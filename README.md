@@ -16,18 +16,19 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
                   │
                   ▼
 [MediaPipe FaceMesh (refine_landmarks=True)]
-     │                    │             │
-     ▼                    ▼             ▼
-[Blink Gate]        [Head Pitch]   [Head Yaw]       [Hardware Typing Lock]
- (EAR < 0.20)      (Keyboard Look) (User-Centric)  (macOS CG / Linux evdev)
-     │                    │             │                    │
-     │       [Pitch >= 25°? Freeze]     │      [Typing < 1.0s? Freeze]
-     ▼                    │             ▼                    │
-[Bilateral Iris Ratio]    │     [Combined Gaze Angle (°)]    │
-     │                    │             │                    │
-     └────────────────────┴─────────────┴────────────────────┤
-                                                             ▼
-                                             [Dwell & Hysteresis State Machine]
+     │                                │                   │
+     ▼                                ▼                   ▼
+[Blink Gate]                      [Head Yaw]      [Hardware Typing Lock]
+ (EAR < 0.20)                  (User-Centric)    (macOS CG / Linux evdev)
+     │                                │                   │
+     ▼                                │         [Typing < 1.0s? Freeze]
+[Bilateral Iris Ratio]                │                   │
+     │                                │                   │
+     └────────────────► [Combined Gaze Angle (°)]         │
+                                │                         │
+                                └────────────┬────────────┘
+                                             ▼
+                             [Dwell & Hysteresis State Machine]
                          (Center: [-25°, +25°], Dwell: 150ms)
                                         │
                                         ▼
@@ -43,8 +44,7 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
    * Camera circular buffer queue is pinned to 1 frame (`CAP_PROP_BUFFERSIZE=1`), eliminating stale driver queues and cutting buffer delay from ~130ms to 0ms.
    * Paced directly by hardware camera VSYNC at 30 FPS.
 2. **Physical Gaze Angle Fusion**: Combines head yaw in degrees with bilateral ocular deflection ($\text{Gaze Angle} = \text{Yaw}^\circ + 20^\circ \cdot (\text{Iris} - 0.50)$).
-3. **Keyboard Glance Gating (`pitch_down_ignore`)**: Automatically pauses gaze transitions whenever your head tilts downward (e.g. past $+25^\circ$) to look at your keyboard or desk, preventing accidental focus shifts while glancing down.
-4. **Hardware Typing Lock (`typing_cooldown`)**: Locks active display focus while you are typing (and for 1.0s after the last keypress), so glances across monitors while touch-typing never pull window focus away from your active editor.
+3. **Hardware Typing Lock (`typing_cooldown`)**: Locks active display focus while you are typing (and for 1.0s after the last keypress), so glances across monitors while typing never pull window focus away from your active editor.
 4. **User-Centric Orientation**:
    * Turning to user's **Left** produces positive degrees ($+^\circ$), targeting Left monitor (`Screen 0`).
    * Looking straight at **Center** produces $\approx 0^\circ$, targeting Center monitor (`Screen 1`).
@@ -94,7 +94,7 @@ uv run eyegaze-focus --save-config
 
 You can also pass custom values while saving:
 ```bash
-uv run eyegaze-focus --center-span 28.0 --pitch-down-ignore 30.0 --save-config
+uv run eyegaze-focus --center-span 28.0 --typing-cooldown 1.5 --save-config
 ```
 
 ### Example `config.toml` Reference
@@ -119,9 +119,6 @@ dwell = 0.15
 
 # Eye Aspect Ratio threshold (frames below this are skipped as blinks)
 ear_threshold = 0.20
-
-# Ignore gaze focus switches when head tilts downward past this angle (looking at keyboard)
-pitch_down_ignore = 25.0
 
 # Disable eye/iris tracking and determine focus strictly from head orientation
 disable_eye_tracking = false
@@ -199,7 +196,7 @@ In head-only mode:
 2. **Calibrate Center Display**:
    Look naturally across your center monitor from left edge to right edge. Observe `Gaze Angle` on the terminal status line:
    ```text
-   EAR: 0.28 | Yaw:  +6.2° | Pitch: +12.0° | Iris: 0.51 | Gaze:  +6.4° -> CENTER (eDP-1)
+   EAR: 0.28 | Yaw:  +6.2° | Iris: 0.51 | Gaze:  +6.4° -> CENTER (eDP-1)
    ```
    * If your gaze angle reaches $\pm 28^\circ$ on wide screens, increase `center_span` to `30.0`:
      ```bash
@@ -210,14 +207,6 @@ In head-only mode:
      uv run eyegaze-focus --center-yaw-offset 4.0 --save-config
      ```
 
-3. **Calibrate Keyboard Ignore Threshold**:
-   Look down at your keyboard as you would while typing. Note the `Pitch` reading:
-   ```text
-   EAR: 0.28 | Pitch: +28.5° | [KEYBOARD LOOK (>= 25°) - FOCUS PAUSED]
-   ```
-   * If keyboard look triggers prematurely while looking at the bottom of your screen, raise `pitch_down_ignore` (e.g. `30.0` or `35.0`).
-   * If typing still occasionally shifts focus, lower it (e.g. `20.0` or `22.0`).
-
 ---
 
 ## CLI Options
@@ -226,7 +215,6 @@ In head-only mode:
 |---|---|---|
 | `--config` | `~/.config/.../config.toml` | Custom path to TOML configuration file |
 | `--save-config` | `False` | Write active settings to config file and exit |
-| `--pitch-down-ignore` | `25.0` | Downward pitch in degrees to ignore gaze (keyboard look) |
 | `--disable-eye-tracking`, `--head-only` | `False` | Disable iris gaze tracking and follow head orientation only |
 | `--enable-eye-tracking` | `True` | Enable iris gaze tracking (overrides `config.toml`) |
 | `--typing-cooldown` | `1.0` | Seconds to freeze focus changes after keyboard typing (`0.0` to disable) |

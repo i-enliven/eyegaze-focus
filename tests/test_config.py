@@ -27,7 +27,6 @@ def test_save_and_load_config_roundtrip(tmp_path):
         "height": 720,
         "dwell": 0.20,
         "ear_threshold": 0.22,
-        "pitch_down_ignore": 30.0,
         "disable_eye_tracking": True,
         "typing_cooldown": 1.5,
         "center_span": 28.0,
@@ -46,7 +45,6 @@ def test_save_and_load_config_roundtrip(tmp_path):
     assert loaded["fps"] == 25.0
     assert loaded["width"] == 1280
     assert loaded["dwell"] == 0.20
-    assert loaded["pitch_down_ignore"] == 30.0
     assert loaded["disable_eye_tracking"] is True
     assert loaded["typing_cooldown"] == 1.5
     assert loaded["center_span"] == 28.0

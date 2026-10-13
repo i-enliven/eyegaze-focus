@@ -8,7 +8,6 @@ from eyegaze_focus.geometry import (
     calculate_ear,
     compute_gaze_angle_deg,
     compute_gaze_score,
-    estimate_head_pose,
     estimate_head_yaw,
     get_bilateral_iris_ratio,
 )
@@ -33,7 +32,6 @@ __all__ = [
     "calculate_ear",
     "compute_gaze_angle_deg",
     "compute_gaze_score",
-    "estimate_head_pose",
     "estimate_head_yaw",
     "get_bilateral_iris_ratio",
     "get_default_config_path",

@@ -1,4 +1,4 @@
-"""Geometry and computer vision calculations for gaze and head pose estimation."""
+"""Geometry, head pose, and iris ratio calculation module."""
 
 import cv2
 import numpy as np
@@ -22,10 +22,10 @@ LEFT_EYE_BOT_1 = 380
 LEFT_EYE_BOT_2 = 373
 LEFT_IRIS = [474, 475, 476, 477]
 
-# Canonical 3D facial model for Head Pose Estimation (OpenCV camera space):
-# Origin (0,0,0) is at nose tip.
-# +X points to viewer's right (person's left).
-# +Y points downwards (chin is +Y, eyes are -Y).
+# 3D Canonical Head Model Points (mm) for solvePnP
+# Standard OpenCV camera coordinates:
+# +X points to the right (subject's left side).
+# +Y points downwards.
 # +Z points away from camera into the scene (eyes/ears are deeper than nose tip).
 FACE_3D_MODEL = np.array(
     [
@@ -122,19 +122,13 @@ def get_bilateral_iris_ratio(landmarks, w: float, h: float) -> float:
     return (r_clamped + l_clamped) / 2.0
 
 
-def estimate_head_pose(landmarks, w: float, h: float) -> tuple[float, float]:
-    """Estimate head yaw (horizontal) and pitch (vertical tilt) in user-centric degrees.
+def estimate_head_yaw(landmarks, w: float, h: float) -> float:
+    """Estimate head yaw rotation angle in user-centric degrees.
 
     Returns:
-        (yaw_deg, pitch_deg)
-        yaw_deg:
-            Positive (+deg): Head turned to user's Left (Screen 0)
-            Negative (-deg): Head turned to user's Right (Screen 2)
-            0.0: Head centered horizontally
-        pitch_deg:
-            Positive (+deg): Head tilted DOWN (looking down at keyboard / desk)
-            Negative (-deg): Head tilted UP
-            0.0: Level gaze vertically
+        Positive yaw (+deg): Head turned to user's Left (Screen 0)
+        Negative yaw (-deg): Head turned to user's Right (Screen 2)
+        0.0: Head centered horizontally
     """
     image_points = np.array(
         [[landmarks[idx].x * w, landmarks[idx].y * h] for idx in HEAD_POSE_LANDMARKS],
@@ -157,25 +151,16 @@ def estimate_head_pose(landmarks, w: float, h: float) -> tuple[float, float]:
         flags=cv2.SOLVEPNP_ITERATIVE,
     )
     if not success:
-        return 0.0, 0.0
+        return 0.0
 
     rot_matrix, _ = cv2.Rodrigues(rvec)
     proj_matrix = np.hstack([rot_matrix, tvec])
     _, _, _, _, _, _, euler = cv2.decomposeProjectionMatrix(proj_matrix)
 
-    # In OpenCV camera coordinates, positive rotation around X tilts down (+pitch).
-    pitch_deg = float(euler[0, 0])
-    # Clockwise rotation around Y tilts to user's left (negate so +yaw is user Left).
+    # In OpenCV camera space, clockwise rotation around Y tilts to user's left.
+    # Negate so user's Left is positive (+deg) and user's Right is negative (-deg).
     raw_yaw = float(euler[1, 0])
-    yaw_deg = -raw_yaw
-
-    return yaw_deg, pitch_deg
-
-
-def estimate_head_yaw(landmarks, w: float, h: float) -> float:
-    """Estimate head yaw rotation angle in user-centric degrees."""
-    yaw, _ = estimate_head_pose(landmarks, w, h)
-    return yaw
+    return -raw_yaw
 
 
 def compute_gaze_angle_deg(

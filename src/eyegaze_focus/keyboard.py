@@ -132,7 +132,7 @@ class KeyboardMonitor:
                             break
                         # struct input_event: timeval (2 longs), type (H), code (H), value (i)
                         _, _, ev_type, _, ev_val = struct.unpack("llHHi", data)
-                        if ev_type == EV_KEY and ev_val in (KEY_PRESS, KEY_REPEAT):
+                        if ev_type == EV_KEY:
                             with self._lock:
                                 self._last_key_time = time.time()
                 except BlockingIOError:

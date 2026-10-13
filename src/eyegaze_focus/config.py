@@ -53,7 +53,6 @@ def save_config(values: dict, config_path: Path | None = None) -> Path:
     height = values.get("height", 480)
     dwell = values.get("dwell", 0.15)
     ear_threshold = values.get("ear_threshold", 0.20)
-    pitch_down_ignore = values.get("pitch_down_ignore", 25.0)
     disable_eye_tracking = values.get("disable_eye_tracking", False)
     typing_cooldown = values.get("typing_cooldown", 1.0)
 
@@ -79,8 +78,6 @@ height = {height}
 dwell = {dwell:.2f}
 # Eye Aspect Ratio threshold (frames below this are skipped as blinks)
 ear_threshold = {ear_threshold:.2f}
-# Ignore gaze focus switches when head tilts downward past this angle (looking at keyboard)
-pitch_down_ignore = {pitch_down_ignore:.1f}
 # Disable eye/iris tracking and determine focus strictly from head orientation
 disable_eye_tracking = {str(disable_eye_tracking).lower()}
 # Freeze focus changes for this duration after keyboard typing (seconds, 0.0 to disable)

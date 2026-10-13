@@ -15,7 +15,7 @@ from eyegaze_focus.config import get_default_config_path, load_config, save_conf
 from eyegaze_focus.geometry import (
     calculate_ear,
     compute_gaze_angle_deg,
-    estimate_head_pose,
+    estimate_head_yaw,
     get_bilateral_iris_ratio,
 )
 from eyegaze_focus.ipc import IpcClient
@@ -108,12 +108,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Offset in degrees to subtract from raw head yaw for center baseline (default: 0.0)",
     )
     parser.add_argument(
-        "--pitch-down-ignore",
-        type=float,
-        default=cfg.get("pitch_down_ignore", 25.0),
-        help="Downward head pitch threshold in degrees to ignore gaze (looking at keyboard) (default: 25.0)",
-    )
-    parser.add_argument(
         "--disable-eye-tracking",
         dest="disable_eye_tracking",
         action="store_true",
@@ -174,7 +168,6 @@ def run_daemon(args: argparse.Namespace) -> int:
             "height": args.height,
             "dwell": args.dwell,
             "ear_threshold": args.ear_threshold,
-            "pitch_down_ignore": args.pitch_down_ignore,
             "disable_eye_tracking": args.disable_eye_tracking,
             "typing_cooldown": args.typing_cooldown,
             "center_span": args.center_span,
@@ -236,9 +229,9 @@ def run_daemon(args: argparse.Namespace) -> int:
     if args.calibrate:
         print(f"\n--- CALIBRATION MODE (Press Ctrl+C to exit) | Config: {args.config} ---")
         if args.disable_eye_tracking:
-            print("Mode: HEAD-ONLY (Iris tracking disabled)\nFormat: [Yaw / Pitch] [Mode] [Angle] -> Screen (Output)\n")
+            print("Mode: HEAD-ONLY (Iris tracking disabled)\nFormat: [Yaw] [Mode] [Angle] -> Screen (Output)\n")
         else:
-            print("Format: [EAR] [Yaw / Pitch] [Iris Ratio] [Gaze Angle] -> Screen (Output)\n")
+            print("Format: [EAR] [Yaw] [Iris Ratio] [Gaze Angle] -> Screen (Output)\n")
 
     try:
         while running and cap.isOpened():
@@ -263,18 +256,7 @@ def run_daemon(args: argparse.Namespace) -> int:
                         sys.stdout.flush()
                     continue
 
-                head_yaw, head_pitch = estimate_head_pose(landmarks, w, h)
-
-                # Check if user is looking down at keyboard
-                if head_pitch >= args.pitch_down_ignore:
-                    if args.calibrate:
-                        sys.stdout.write(
-                            f"\rEAR: {avg_ear:.2f} | Pitch: {head_pitch:+5.1f}° | "
-                            f"[KEYBOARD LOOK (>= {args.pitch_down_ignore:.0f}°) - FOCUS PAUSED]{' ' * 20}"
-                        )
-                        sys.stdout.flush()
-                    # Do not update dwell filter; freeze current focus
-                    continue
+                head_yaw = estimate_head_yaw(landmarks, w, h)
 
                 # Check if user is typing on keyboard
                 if args.typing_cooldown > 0.0 and keyboard_monitor.is_typing(args.typing_cooldown):
@@ -305,13 +287,13 @@ def run_daemon(args: argparse.Namespace) -> int:
                     effective_yaw = head_yaw - args.center_yaw_offset
                     if args.disable_eye_tracking:
                         sys.stdout.write(
-                            f"\rYaw: {effective_yaw:+5.1f}° | Pitch: {head_pitch:+5.1f}° | "
+                            f"\rYaw: {effective_yaw:+5.1f}° | "
                             f"[HEAD ONLY] | Angle: {gaze_angle:+5.1f}° -> "
                             f"{screen_names.get(detected_screen, '?'):<6} ({output_name}){' ' * 10}"
                         )
                     else:
                         sys.stdout.write(
-                            f"\rEAR: {avg_ear:.2f} | Yaw: {effective_yaw:+5.1f}° | Pitch: {head_pitch:+5.1f}° | "
+                            f"\rEAR: {avg_ear:.2f} | Yaw: {effective_yaw:+5.1f}° | "
                             f"Iris: {iris_ratio:.2f} | Gaze: {gaze_angle:+5.1f}° -> "
                             f"{screen_names.get(detected_screen, '?'):<6} ({output_name}){' ' * 10}"
                         )
