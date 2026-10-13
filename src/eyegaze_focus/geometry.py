@@ -22,15 +22,19 @@ LEFT_EYE_BOT_1 = 380
 LEFT_EYE_BOT_2 = 373
 LEFT_IRIS = [474, 475, 476, 477]
 
-# 3D facial model for Head Pose Estimation (solvePnP)
+# Canonical 3D facial model for Head Pose Estimation (OpenCV camera space):
+# Origin (0,0,0) is at nose tip.
+# +X points to viewer's right (person's left).
+# +Y points downwards (chin is +Y, eyes are -Y).
+# +Z points away from camera into the scene (eyes/ears are deeper than nose tip).
 FACE_3D_MODEL = np.array(
     [
         (0.0, 0.0, 0.0),          # Nose tip (landmark 1)
-        (0.0, -330.0, -65.0),     # Chin (landmark 199)
-        (-225.0, 170.0, -135.0),  # Right eye corner (landmark 33)
-        (225.0, 170.0, -135.0),   # Left eye corner (landmark 263)
-        (-150.0, -150.0, -125.0), # Right mouth corner (landmark 61)
-        (150.0, -150.0, -125.0),  # Left mouth corner (landmark 291)
+        (0.0, 330.0, 65.0),       # Chin (landmark 199)
+        (-225.0, -170.0, 135.0),  # Right eye outer corner (landmark 33)
+        (225.0, -170.0, 135.0),   # Left eye outer corner (landmark 263)
+        (-150.0, 150.0, 125.0),   # Right mouth corner (landmark 61)
+        (150.0, 150.0, 125.0),    # Left mouth corner (landmark 291)
     ],
     dtype=np.float64,
 )
@@ -138,7 +142,7 @@ def estimate_head_yaw(landmarks, w: float, h: float) -> float:
     )
     dist_coeffs = np.zeros((4, 1), dtype=np.float64)
 
-    success, rvec, _ = cv2.solvePnP(
+    success, rvec, tvec = cv2.solvePnP(
         FACE_3D_MODEL,
         image_points,
         cam_matrix,
@@ -149,15 +153,17 @@ def estimate_head_yaw(landmarks, w: float, h: float) -> float:
         return 0.0
 
     rot_matrix, _ = cv2.Rodrigues(rvec)
-    # Yaw angle around vertical Y axis
-    yaw_rad = np.arctan2(rot_matrix[0, 2], rot_matrix[2, 2])
-    return float(np.degrees(yaw_rad))
+    proj_matrix = np.hstack([rot_matrix, tvec])
+    _, _, _, _, _, _, euler = cv2.decomposeProjectionMatrix(proj_matrix)
+    yaw_deg = float(euler[1, 0])
+    return yaw_deg
 
 
 def compute_gaze_score(
     iris_ratio: float,
     head_yaw_deg: float,
     yaw_weight: float = 0.015,
+    yaw_offset_deg: float = 0.0,
 ) -> float:
     """Fuse bilateral iris ratio and head yaw into a unified horizontal score.
 
@@ -166,5 +172,6 @@ def compute_gaze_score(
       0.42 - 0.58: Gaze directed to Center screen (Screen 1)
       > 0.58: Gaze directed to Left screen (Screen 0)
     """
-    composite = iris_ratio + (yaw_weight * head_yaw_deg)
+    effective_yaw = head_yaw_deg - yaw_offset_deg
+    composite = iris_ratio + (yaw_weight * effective_yaw)
     return float(np.clip(composite, 0.0, 1.0))

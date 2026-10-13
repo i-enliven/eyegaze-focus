@@ -174,6 +174,10 @@ def test_compute_gaze_score():
     right_score = compute_gaze_score(0.40, -15.0, yaw_weight=0.01)
     assert right_score == pytest.approx(0.25, abs=0.01)
 
+    # Offset compensation: raw yaw is -10 deg due to camera offset, but offset is -10 deg -> effective yaw = 0
+    compensated_score = compute_gaze_score(0.50, -10.0, yaw_weight=0.015, yaw_offset_deg=-10.0)
+    assert compensated_score == pytest.approx(0.50, abs=0.01)
+
     # Clamping
     assert compute_gaze_score(0.9, 50.0) == 1.0
     assert compute_gaze_score(0.1, -50.0) == 0.0

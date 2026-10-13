@@ -32,12 +32,13 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
 ```
 
 ### Key Technical Characteristics
-1. **Composite Gaze Fusion**: Fuses bilateral eye iris ratios with 3D Head Pose yaw estimation (`cv2.solvePnP` using canonical 3D facial anchors). This prevents misclassification caused by natural head turns where irises re-center in eye sockets.
+1. **Composite Gaze Fusion**: Fuses bilateral eye iris ratios with 3D Head Pose yaw estimation (`cv2.solvePnP` using canonical 3D facial anchors and `cv2.decomposeProjectionMatrix`). This prevents misclassification caused by natural head turns where irises re-center in eye sockets.
 2. **Bilateral Tracking**: Simultaneously tracks both eyes to avoid epicanthic occlusion errors when looking to lateral extremes.
 3. **Blink Gating**: Computes Eye Aspect Ratio (EAR). Frames where eyes are closed are skipped to prevent eyelid seam landmark collapse from corrupting the dwell state machine.
 4. **Hysteresis Boundaries**: Dual entry and exit thresholds prevent oscillation along screen borders:
    - Left Screen: enters at `score >= 0.60`, exits at `score < 0.55`.
    - Right Screen: enters at `score <= 0.40`, exits at `score > 0.45`.
+   - Center Screen: resting interval between hysteresis thresholds.
 5. **Dwell Debounce**: Requires sustained gaze (default: 250ms) before committing focus switches to ignore casual saccades.
 6. **Automatic Output Geometry Discovery**: Automatically queries `swaymsg -t get_outputs` (or `i3-msg`), filters active monitors, and sorts them horizontally by `rect.x` coordinate.
 
@@ -65,7 +66,13 @@ uv run eyegaze-focus --calibrate
 
 Sample output:
 ```text
-EAR: 0.28 | Yaw: +16.2° | Iris: 0.61 | Score: 0.77 -> LEFT   (DP-1)
+EAR: 0.28 | Yaw:  +1.2° | Iris: 0.50 | Score: 0.52 -> CENTER (eDP-1)
+```
+
+If your camera is offset horizontally relative to your center screen (e.g., mounted to the side), note the resting Yaw shown when looking directly at your center monitor, and supply it via `--center-yaw-offset`:
+
+```bash
+uv run eyegaze-focus --calibrate --center-yaw-offset 5.0
 ```
 
 ### CLI Options
@@ -79,6 +86,7 @@ EAR: 0.28 | Yaw: +16.2° | Iris: 0.61 | Score: 0.77 -> LEFT   (DP-1)
 | `--dwell` | `0.25` | Dwell duration in seconds required before switching |
 | `--ear-threshold` | `0.20` | Minimum EAR below which frame is discarded as a blink |
 | `--yaw-weight` | `0.015` | Multiplier for head yaw in composite gaze score |
+| `--center-yaw-offset` | `0.0` | Baseline offset in degrees subtracted from head yaw |
 | `--width` | `640` | Video capture width |
 | `--height` | `480` | Video capture height |
 | `-v, --verbose` | `False` | Enable debug logging |

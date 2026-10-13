@@ -48,6 +48,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Weight multiplier for head yaw in composite gaze score (default: 0.015)",
     )
     parser.add_argument(
+        "--center-yaw-offset",
+        type=float,
+        default=0.0,
+        help="Offset in degrees to subtract from raw head yaw for center baseline (default: 0.0)",
+    )
+    parser.add_argument(
         "--calibrate",
         action="store_true",
         help="Run in interactive calibration mode without dispatching IPC commands",
@@ -127,13 +133,19 @@ def run_daemon(args: argparse.Namespace) -> int:
                 if avg_ear >= args.ear_threshold:
                     iris_ratio = get_bilateral_iris_ratio(landmarks, w, h)
                     head_yaw = estimate_head_yaw(landmarks, w, h)
-                    score = compute_gaze_score(iris_ratio, head_yaw, yaw_weight=args.yaw_weight)
+                    score = compute_gaze_score(
+                        iris_ratio,
+                        head_yaw,
+                        yaw_weight=args.yaw_weight,
+                        yaw_offset_deg=args.center_yaw_offset,
+                    )
                     detected_screen = classifier.classify(score)
                     output_name = ipc_client.get_output_for_screen(detected_screen)
 
                     if args.calibrate:
+                        effective_yaw = head_yaw - args.center_yaw_offset
                         sys.stdout.write(
-                            f"\rEAR: {avg_ear:.2f} | Yaw: {head_yaw:+5.1f}° | Iris: {iris_ratio:.2f} | "
+                            f"\rEAR: {avg_ear:.2f} | Yaw: {effective_yaw:+5.1f}° | Iris: {iris_ratio:.2f} | "
                             f"Score: {score:.2f} -> {screen_names.get(detected_screen, '?'):<6} "
                             f"({output_name})"
                         )
