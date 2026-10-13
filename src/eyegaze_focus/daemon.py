@@ -113,6 +113,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Downward head pitch threshold in degrees to ignore gaze (looking at keyboard) (default: 25.0)",
     )
     parser.add_argument(
+        "--disable-eye-tracking",
+        dest="disable_eye_tracking",
+        action="store_true",
+        default=cfg.get("disable_eye_tracking", False),
+        help="Disable eye/iris tracking and determine focus strictly from head orientation",
+    )
+    parser.add_argument(
+        "--enable-eye-tracking",
+        dest="disable_eye_tracking",
+        action="store_false",
+        help="Enable eye/iris tracking (overrides disable_eye_tracking in config)",
+    )
+    parser.add_argument(
+        "--head-only",
+        dest="disable_eye_tracking",
+        action="store_true",
+        help="Alias for --disable-eye-tracking",
+    )
+    parser.add_argument(
         "--backend",
         choices=["auto", "sway", "i3", "yabai", "osascript"],
         default=cfg.get("backend", "auto"),
@@ -149,6 +168,7 @@ def run_daemon(args: argparse.Namespace) -> int:
             "dwell": args.dwell,
             "ear_threshold": args.ear_threshold,
             "pitch_down_ignore": args.pitch_down_ignore,
+            "disable_eye_tracking": args.disable_eye_tracking,
             "center_span": args.center_span,
             "hysteresis": args.hysteresis,
             "iris_weight": args.iris_weight,
@@ -197,7 +217,8 @@ def run_daemon(args: argparse.Namespace) -> int:
     screen_names = {0: "LEFT", 1: "CENTER", 2: "RIGHT"}
 
     logger.info(
-        "Starting low-latency gaze tracking loop (Center: [-%s°, +%s°], Dwell: %.2fs, Target FPS: %.1f)",
+        "Starting %s tracking loop (Center: [-%s°, +%s°], Dwell: %.2fs, Target FPS: %.1f)",
+        "head-only" if args.disable_eye_tracking else "low-latency gaze",
         args.center_span,
         args.center_span,
         args.dwell,
@@ -205,7 +226,10 @@ def run_daemon(args: argparse.Namespace) -> int:
     )
     if args.calibrate:
         print(f"\n--- CALIBRATION MODE (Press Ctrl+C to exit) | Config: {args.config} ---")
-        print("Format: [EAR] [Yaw / Pitch] [Iris Ratio] [Gaze Angle] -> Screen (Output)\n")
+        if args.disable_eye_tracking:
+            print("Mode: HEAD-ONLY (Iris tracking disabled)\nFormat: [Yaw / Pitch] [Mode] [Angle] -> Screen (Output)\n")
+        else:
+            print("Format: [EAR] [Yaw / Pitch] [Iris Ratio] [Gaze Angle] -> Screen (Output)\n")
 
     try:
         while running and cap.isOpened():
@@ -223,20 +247,30 @@ def run_daemon(args: argparse.Namespace) -> int:
                 landmarks = results.multi_face_landmarks[0].landmark
                 _, _, avg_ear = calculate_ear(landmarks, w, h)
 
-                if avg_ear >= args.ear_threshold:
-                    head_yaw, head_pitch = estimate_head_pose(landmarks, w, h)
+                # Skip frame on blink only when eye tracking is enabled
+                if not args.disable_eye_tracking and avg_ear < args.ear_threshold:
+                    if args.calibrate:
+                        sys.stdout.write(f"\rEAR: {avg_ear:.2f} | [BLINK DETECTED - SKIPPED]{' ' * 35}")
+                        sys.stdout.flush()
+                    continue
 
-                    # Check if user is looking down at keyboard
-                    if head_pitch >= args.pitch_down_ignore:
-                        if args.calibrate:
-                            sys.stdout.write(
-                                f"\rEAR: {avg_ear:.2f} | Pitch: {head_pitch:+5.1f}° | "
-                                f"[KEYBOARD LOOK (>= {args.pitch_down_ignore:.0f}°) - FOCUS PAUSED]{' ' * 20}"
-                            )
-                            sys.stdout.flush()
-                        # Do not update dwell filter; freeze current focus
-                        continue
+                head_yaw, head_pitch = estimate_head_pose(landmarks, w, h)
 
+                # Check if user is looking down at keyboard
+                if head_pitch >= args.pitch_down_ignore:
+                    if args.calibrate:
+                        sys.stdout.write(
+                            f"\rEAR: {avg_ear:.2f} | Pitch: {head_pitch:+5.1f}° | "
+                            f"[KEYBOARD LOOK (>= {args.pitch_down_ignore:.0f}°) - FOCUS PAUSED]{' ' * 20}"
+                        )
+                        sys.stdout.flush()
+                    # Do not update dwell filter; freeze current focus
+                    continue
+
+                if args.disable_eye_tracking:
+                    iris_ratio = 0.50
+                    gaze_angle = head_yaw - args.center_yaw_offset
+                else:
                     iris_ratio = get_bilateral_iris_ratio(landmarks, w, h)
                     gaze_angle = compute_gaze_angle_deg(
                         iris_ratio=iris_ratio,
@@ -244,31 +278,34 @@ def run_daemon(args: argparse.Namespace) -> int:
                         iris_weight_deg=args.iris_weight,
                         yaw_offset_deg=args.center_yaw_offset,
                     )
-                    detected_screen = classifier.classify(gaze_angle)
-                    output_name = ipc_client.get_output_for_screen(detected_screen)
+                detected_screen = classifier.classify(gaze_angle)
+                output_name = ipc_client.get_output_for_screen(detected_screen)
 
-                    if args.calibrate:
-                        effective_yaw = head_yaw - args.center_yaw_offset
+                if args.calibrate:
+                    effective_yaw = head_yaw - args.center_yaw_offset
+                    if args.disable_eye_tracking:
+                        sys.stdout.write(
+                            f"\rYaw: {effective_yaw:+5.1f}° | Pitch: {head_pitch:+5.1f}° | "
+                            f"[HEAD ONLY] | Angle: {gaze_angle:+5.1f}° -> "
+                            f"{screen_names.get(detected_screen, '?'):<6} ({output_name}){' ' * 10}"
+                        )
+                    else:
                         sys.stdout.write(
                             f"\rEAR: {avg_ear:.2f} | Yaw: {effective_yaw:+5.1f}° | Pitch: {head_pitch:+5.1f}° | "
                             f"Iris: {iris_ratio:.2f} | Gaze: {gaze_angle:+5.1f}° -> "
                             f"{screen_names.get(detected_screen, '?'):<6} ({output_name}){' ' * 10}"
                         )
-                        sys.stdout.flush()
-                    else:
-                        committed = dwell_filter.update(detected_screen, timestamp=start_loop)
-                        if committed is not None:
-                            logger.info(
-                                "Focusing screen %d (%s) on output %s",
-                                committed,
-                                screen_names.get(committed, "?"),
-                                output_name,
-                            )
-                            ipc_client.focus_screen(committed)
+                    sys.stdout.flush()
                 else:
-                    if args.calibrate:
-                        sys.stdout.write(f"\rEAR: {avg_ear:.2f} | [BLINK DETECTED - SKIPPED]{' ' * 35}")
-                        sys.stdout.flush()
+                    committed = dwell_filter.update(detected_screen, timestamp=start_loop)
+                    if committed is not None:
+                        logger.info(
+                            "Focusing screen %d (%s) on output %s",
+                            committed,
+                            screen_names.get(committed, "?"),
+                            output_name,
+                        )
+                        ipc_client.focus_screen(committed)
             else:
                 if args.calibrate:
                     sys.stdout.write(f"\r[NO FACE DETECTED]{' ' * 50}")

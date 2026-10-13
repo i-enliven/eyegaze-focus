@@ -122,6 +122,9 @@ ear_threshold = 0.20
 # Ignore gaze focus switches when head tilts downward past this angle (looking at keyboard)
 pitch_down_ignore = 25.0
 
+# Disable eye/iris tracking and determine focus strictly from head orientation
+disable_eye_tracking = false
+
 [geometry]
 # Half-width of center screen deadband in degrees (center spans [-25.0°, +25.0°])
 center_span = 25.0
@@ -139,6 +142,27 @@ center_yaw_offset = 0.0
 # Window manager display backend: "auto", "sway", "i3", "yabai", or "osascript"
 name = "auto"
 ```
+
+---
+
+## Head-Only Tracking Mode
+
+If you wear thick glasses with reflections, experience lighting conditions where iris landmarks are noisy, or prefer intentional head turns to trigger screen switches, enable head-only tracking:
+
+```bash
+uv run eyegaze-focus --head-only
+```
+
+Or persist it in `~/.config/eyegaze-focus/config.toml`:
+```toml
+[tracking]
+disable_eye_tracking = true
+```
+
+In head-only mode:
+* **Zero blink dropouts**: MediaPipe EAR blink gating is skipped, keeping head tracking continuous during blinks or squinting.
+* **Lower latency**: Iris landmark extraction is bypassed.
+* **Simple mental model**: Focus is calculated strictly from calibrated head yaw: $\text{Angle}^\circ = \text{HeadYaw}^\circ - \text{CenterYawOffset}^\circ$.
 
 ---
 
@@ -181,6 +205,8 @@ name = "auto"
 | `--config` | `~/.config/.../config.toml` | Custom path to TOML configuration file |
 | `--save-config` | `False` | Write active settings to config file and exit |
 | `--pitch-down-ignore` | `25.0` | Downward pitch in degrees to ignore gaze (keyboard look) |
+| `--disable-eye-tracking`, `--head-only` | `False` | Disable iris gaze tracking and follow head orientation only |
+| `--enable-eye-tracking` | `True` | Enable iris gaze tracking (overrides `config.toml`) |
 | `--center-span` | `25.0` | Half-width of center screen deadband in degrees (`[-25°, +25°]`) |
 | `--hysteresis` | `5.0` | Hysteresis margin in degrees before releasing screen focus |
 | `--center-yaw-offset` | `0.0` | Baseline offset in degrees subtracted from raw head yaw |

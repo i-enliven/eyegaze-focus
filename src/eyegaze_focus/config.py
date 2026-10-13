@@ -36,6 +36,9 @@ def load_config(config_path: Path | None = None) -> dict:
                 else:
                     flat[k] = v
 
+    if "head_only" in flat and "disable_eye_tracking" not in flat:
+        flat["disable_eye_tracking"] = flat["head_only"]
+
     return flat
 
 
@@ -51,6 +54,7 @@ def save_config(values: dict, config_path: Path | None = None) -> Path:
     dwell = values.get("dwell", 0.15)
     ear_threshold = values.get("ear_threshold", 0.20)
     pitch_down_ignore = values.get("pitch_down_ignore", 25.0)
+    disable_eye_tracking = values.get("disable_eye_tracking", False)
 
     center_span = values.get("center_span", 25.0)
     hysteresis = values.get("hysteresis", 5.0)
@@ -76,6 +80,8 @@ dwell = {dwell:.2f}
 ear_threshold = {ear_threshold:.2f}
 # Ignore gaze focus switches when head tilts downward past this angle (looking at keyboard)
 pitch_down_ignore = {pitch_down_ignore:.1f}
+# Disable eye/iris tracking and determine focus strictly from head orientation
+disable_eye_tracking = {str(disable_eye_tracking).lower()}
 
 [geometry]
 # Half-width of center screen deadband in degrees (center spans [-{center_span:.1f}°, +{center_span:.1f}°])
