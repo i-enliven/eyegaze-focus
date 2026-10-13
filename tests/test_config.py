@@ -29,6 +29,7 @@ def test_save_and_load_config_roundtrip(tmp_path):
         "ear_threshold": 0.22,
         "pitch_down_ignore": 30.0,
         "disable_eye_tracking": True,
+        "typing_cooldown": 1.5,
         "center_span": 28.0,
         "hysteresis": 6.0,
         "iris_weight": 22.0,
@@ -47,6 +48,7 @@ def test_save_and_load_config_roundtrip(tmp_path):
     assert loaded["dwell"] == 0.20
     assert loaded["pitch_down_ignore"] == 30.0
     assert loaded["disable_eye_tracking"] is True
+    assert loaded["typing_cooldown"] == 1.5
     assert loaded["center_span"] == 28.0
     assert loaded["center_yaw_offset"] == 3.5
     assert loaded["backend"] == "yabai"
@@ -68,9 +70,11 @@ def test_parse_args_head_only_flags(tmp_path):
 
     args1 = parse_args(["--config", str(empty_config)])
     assert args1.disable_eye_tracking is False
+    assert args1.typing_cooldown == 1.0
 
-    args2 = parse_args(["--config", str(empty_config), "--disable-eye-tracking"])
+    args2 = parse_args(["--config", str(empty_config), "--disable-eye-tracking", "--typing-cooldown", "2.0"])
     assert args2.disable_eye_tracking is True
+    assert args2.typing_cooldown == 2.0
 
     args3 = parse_args(["--config", str(empty_config), "--head-only"])
     assert args3.disable_eye_tracking is True
@@ -79,10 +83,12 @@ def test_parse_args_head_only_flags(tmp_path):
     head_only_config = tmp_path / "head_only.toml"
     head_only_config.write_text("""[tracking]
 disable_eye_tracking = true
+typing_cooldown = 0.5
 """)
 
     args4 = parse_args(["--config", str(head_only_config)])
     assert args4.disable_eye_tracking is True
+    assert args4.typing_cooldown == 0.5
 
     args5 = parse_args(["--config", str(head_only_config), "--enable-eye-tracking"])
     assert args5.disable_eye_tracking is False

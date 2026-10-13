@@ -19,11 +19,13 @@ from eyegaze_focus.ipc import (
     SwayI3Backend,
     YabaiBackend,
 )
+from eyegaze_focus.keyboard import KeyboardMonitor
 
 __all__ = [
     "DisplayBackend",
     "DwellFilter",
     "IpcClient",
+    "KeyboardMonitor",
     "OsascriptBackend",
     "ScreenClassifier",
     "SwayI3Backend",

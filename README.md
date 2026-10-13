@@ -18,16 +18,16 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
 [MediaPipe FaceMesh (refine_landmarks=True)]
      │                    │             │
      ▼                    ▼             ▼
-[Blink Gate]        [Head Pitch]   [Head Yaw]
- (EAR < 0.20)      (Keyboard Look) (User-Centric: +Left, -Right)
-     │                    │             │
-     │       [Pitch >= 25°? Freeze]     │
-     ▼                    │             ▼
-[Bilateral Iris Ratio]    │     [Combined Gaze Angle (°)]
-     │                    │             │
-     └────────────────────┴─────────────┤
-                                        ▼
-                        [Dwell & Hysteresis State Machine]
+[Blink Gate]        [Head Pitch]   [Head Yaw]       [Hardware Typing Lock]
+ (EAR < 0.20)      (Keyboard Look) (User-Centric)  (macOS CG / Linux evdev)
+     │                    │             │                    │
+     │       [Pitch >= 25°? Freeze]     │      [Typing < 1.0s? Freeze]
+     ▼                    │             ▼                    │
+[Bilateral Iris Ratio]    │     [Combined Gaze Angle (°)]    │
+     │                    │             │                    │
+     └────────────────────┴─────────────┴────────────────────┤
+                                                             ▼
+                                             [Dwell & Hysteresis State Machine]
                          (Center: [-25°, +25°], Dwell: 150ms)
                                         │
                                         ▼
@@ -43,7 +43,8 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
    * Camera circular buffer queue is pinned to 1 frame (`CAP_PROP_BUFFERSIZE=1`), eliminating stale driver queues and cutting buffer delay from ~130ms to 0ms.
    * Paced directly by hardware camera VSYNC at 30 FPS.
 2. **Physical Gaze Angle Fusion**: Combines head yaw in degrees with bilateral ocular deflection ($\text{Gaze Angle} = \text{Yaw}^\circ + 20^\circ \cdot (\text{Iris} - 0.50)$).
-3. **Keyboard Glance Gating (`pitch_down_ignore`)**: Automatically pauses gaze transitions whenever your head tilts downward (e.g. past $+25^\circ$) to look at your keyboard or desk, preventing accidental focus shifts while typing.
+3. **Keyboard Glance Gating (`pitch_down_ignore`)**: Automatically pauses gaze transitions whenever your head tilts downward (e.g. past $+25^\circ$) to look at your keyboard or desk, preventing accidental focus shifts while glancing down.
+4. **Hardware Typing Lock (`typing_cooldown`)**: Locks active display focus while you are typing (and for 1.0s after the last keypress), so glances across monitors while touch-typing never pull window focus away from your active editor.
 4. **User-Centric Orientation**:
    * Turning to user's **Left** produces positive degrees ($+^\circ$), targeting Left monitor (`Screen 0`).
    * Looking straight at **Center** produces $\approx 0^\circ$, targeting Center monitor (`Screen 1`).
@@ -125,6 +126,9 @@ pitch_down_ignore = 25.0
 # Disable eye/iris tracking and determine focus strictly from head orientation
 disable_eye_tracking = false
 
+# Freeze focus changes for this duration after keyboard typing (seconds, 0.0 to disable)
+typing_cooldown = 1.0
+
 [geometry]
 # Half-width of center screen deadband in degrees (center spans [-25.0°, +25.0°])
 center_span = 25.0
@@ -142,6 +146,24 @@ center_yaw_offset = 0.0
 # Window manager display backend: "auto", "sway", "i3", "yabai", or "osascript"
 name = "auto"
 ```
+
+---
+
+## Keyboard Typing Lock (`typing_cooldown`)
+
+When touch-typing, your head remains facing the screen, but your eyes may glance toward adjacent reference materials. If screen focus switches mid-sentence, subsequent keystrokes would be sent to the wrong window.
+
+`eyegaze-focus` monitors system-wide keyboard events and freezes display focus while you are typing, plus a configurable cooldown buffer:
+
+* **Default**: `1.0` second cooldown (`typing_cooldown = 1.0`).
+* **Disable**: Set `--typing-cooldown 0.0` or `typing_cooldown = 0.0` in `config.toml`.
+* **Platform Mechanics**:
+  * **macOS**: Zero-permission native query via CoreGraphics `CGEventSourceSecondsSinceLastEventType`.
+  * **Linux**: Real-time hardware `/dev/input/event*` listener. Requires your user to be in the `input` group:
+    ```bash
+    sudo usermod -a -G input $USER
+    # Note: Log out and log back in for group membership to take effect
+    ```
 
 ---
 
@@ -207,6 +229,7 @@ In head-only mode:
 | `--pitch-down-ignore` | `25.0` | Downward pitch in degrees to ignore gaze (keyboard look) |
 | `--disable-eye-tracking`, `--head-only` | `False` | Disable iris gaze tracking and follow head orientation only |
 | `--enable-eye-tracking` | `True` | Enable iris gaze tracking (overrides `config.toml`) |
+| `--typing-cooldown` | `1.0` | Seconds to freeze focus changes after keyboard typing (`0.0` to disable) |
 | `--center-span` | `25.0` | Half-width of center screen deadband in degrees (`[-25°, +25°]`) |
 | `--hysteresis` | `5.0` | Hysteresis margin in degrees before releasing screen focus |
 | `--center-yaw-offset` | `0.0` | Baseline offset in degrees subtracted from raw head yaw |

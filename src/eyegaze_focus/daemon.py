@@ -19,6 +19,7 @@ from eyegaze_focus.geometry import (
     get_bilateral_iris_ratio,
 )
 from eyegaze_focus.ipc import IpcClient
+from eyegaze_focus.keyboard import KeyboardMonitor
 
 logger = logging.getLogger("eyegaze_focus")
 
@@ -132,6 +133,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Alias for --disable-eye-tracking",
     )
     parser.add_argument(
+        "--typing-cooldown",
+        type=float,
+        default=cfg.get("typing_cooldown", 1.0),
+        help="Seconds to freeze display focus changes after keyboard typing (0.0 to disable) (default: 1.0)",
+    )
+    parser.add_argument(
         "--backend",
         choices=["auto", "sway", "i3", "yabai", "osascript"],
         default=cfg.get("backend", "auto"),
@@ -169,6 +176,7 @@ def run_daemon(args: argparse.Namespace) -> int:
             "ear_threshold": args.ear_threshold,
             "pitch_down_ignore": args.pitch_down_ignore,
             "disable_eye_tracking": args.disable_eye_tracking,
+            "typing_cooldown": args.typing_cooldown,
             "center_span": args.center_span,
             "hysteresis": args.hysteresis,
             "iris_weight": args.iris_weight,
@@ -185,6 +193,7 @@ def run_daemon(args: argparse.Namespace) -> int:
 
     classifier = ScreenClassifier(center_span_deg=args.center_span, hysteresis_deg=args.hysteresis)
     dwell_filter = DwellFilter(dwell_threshold_sec=args.dwell)
+    keyboard_monitor = KeyboardMonitor(enabled=(args.typing_cooldown > 0.0))
 
     cap = cv2.VideoCapture(args.camera)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -267,6 +276,17 @@ def run_daemon(args: argparse.Namespace) -> int:
                     # Do not update dwell filter; freeze current focus
                     continue
 
+                # Check if user is typing on keyboard
+                if args.typing_cooldown > 0.0 and keyboard_monitor.is_typing(args.typing_cooldown):
+                    time_since_key = keyboard_monitor.time_since_last_key()
+                    if args.calibrate:
+                        sys.stdout.write(
+                            f"\r[TYPING ACTIVE ({time_since_key:.1f}s ago <= {args.typing_cooldown:.1f}s) - FOCUS PAUSED]{' ' * 20}"
+                        )
+                        sys.stdout.flush()
+                    # Do not update dwell filter; freeze current focus
+                    continue
+
                 if args.disable_eye_tracking:
                     iris_ratio = 0.50
                     gaze_angle = head_yaw - args.center_yaw_offset
@@ -319,6 +339,7 @@ def run_daemon(args: argparse.Namespace) -> int:
     finally:
         if args.calibrate:
             print("\nExiting calibration mode.")
+        keyboard_monitor.close()
         cap.release()
         face_mesh.close()
         logger.info("eyegaze-focus daemon stopped.")

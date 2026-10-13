@@ -55,6 +55,7 @@ def save_config(values: dict, config_path: Path | None = None) -> Path:
     ear_threshold = values.get("ear_threshold", 0.20)
     pitch_down_ignore = values.get("pitch_down_ignore", 25.0)
     disable_eye_tracking = values.get("disable_eye_tracking", False)
+    typing_cooldown = values.get("typing_cooldown", 1.0)
 
     center_span = values.get("center_span", 25.0)
     hysteresis = values.get("hysteresis", 5.0)
@@ -82,6 +83,8 @@ ear_threshold = {ear_threshold:.2f}
 pitch_down_ignore = {pitch_down_ignore:.1f}
 # Disable eye/iris tracking and determine focus strictly from head orientation
 disable_eye_tracking = {str(disable_eye_tracking).lower()}
+# Freeze focus changes for this duration after keyboard typing (seconds, 0.0 to disable)
+typing_cooldown = {typing_cooldown:.2f}
 
 [geometry]
 # Half-width of center screen deadband in degrees (center spans [-{center_span:.1f}°, +{center_span:.1f}°])
@@ -94,8 +97,8 @@ iris_weight = {iris_weight:.1f}
 center_yaw_offset = {center_yaw_offset:.1f}
 
 [backend]
-# Window manager display backend: "auto", "sway", "i3", "yabai", or "osascript"
-name = "{backend}"
+# Window manager display backend: \"auto\", \"sway\", \"i3\", \"yabai\", or \"osascript\"
+name = \"{backend}\"
 """
 
     with open(path, "w", encoding="utf-8") as f:
