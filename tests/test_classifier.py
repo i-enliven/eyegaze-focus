@@ -51,7 +51,7 @@ def test_screen_classifier_hysteresis_right():
 
 
 def test_dwell_filter_behavior():
-    filter_ = DwellFilter(dwell_threshold_sec=0.25, initial_focused_screen=1)
+    filter_ = DwellFilter(dwell_threshold_sec=0.15, initial_focused_screen=1)
 
     # Target remains current focused screen -> no event
     assert filter_.update(1, timestamp=10.0) is None
@@ -59,32 +59,32 @@ def test_dwell_filter_behavior():
     # Change to screen 0 at t=10.1s
     assert filter_.update(0, timestamp=10.1) is None
 
-    # After 0.20s (t=10.3s) -> still below 0.25s threshold
-    assert filter_.update(0, timestamp=10.3) is None
+    # After 0.10s (t=10.2s) -> still below 0.15s threshold
+    assert filter_.update(0, timestamp=10.2) is None
 
-    # At t=10.36s (delta = 0.26s >= 0.25s) -> triggers focus change
-    committed = filter_.update(0, timestamp=10.36)
+    # At t=10.26s (delta = 0.16s >= 0.15s) -> triggers focus change
+    committed = filter_.update(0, timestamp=10.26)
     assert committed == 0
 
     # Subsequent frames looking at screen 0 return None (already focused)
-    assert filter_.update(0, timestamp=10.40) is None
+    assert filter_.update(0, timestamp=10.30) is None
 
 
 def test_dwell_filter_jitter_reset():
-    filter_ = DwellFilter(dwell_threshold_sec=0.25, initial_focused_screen=1)
+    filter_ = DwellFilter(dwell_threshold_sec=0.15, initial_focused_screen=1)
 
     # Saccade to screen 0 at t=10.0
     assert filter_.update(0, timestamp=10.0) is None
+    assert filter_.update(0, timestamp=10.10) is None
+
+    # Gaze flinches back to center (screen 1) at t=10.12
+    assert filter_.update(1, timestamp=10.12) is None
+
+    # Looking back at screen 0 at t=10.15 resets start time
     assert filter_.update(0, timestamp=10.15) is None
 
-    # Gaze flinches back to center (screen 1) at t=10.18
-    assert filter_.update(1, timestamp=10.18) is None
+    # At t=10.25 (delta from 10.15 is 0.10s < 0.15s) -> not triggered yet
+    assert filter_.update(0, timestamp=10.25) is None
 
-    # Looking back at screen 0 at t=10.20 resets start time
-    assert filter_.update(0, timestamp=10.20) is None
-
-    # At t=10.40 (delta from 10.20 is 0.20s < 0.25s) -> not triggered yet
-    assert filter_.update(0, timestamp=10.40) is None
-
-    # At t=10.46 (delta from 10.20 is 0.26s >= 0.25s) -> triggers
-    assert filter_.update(0, timestamp=10.46) == 0
+    # At t=10.32 (delta from 10.15 is 0.17s >= 0.15s) -> triggers
+    assert filter_.update(0, timestamp=10.32) == 0

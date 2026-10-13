@@ -26,14 +26,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Gaze-driven discrete display focus daemon for Sway, i3, and macOS.",
     )
     parser.add_argument("--camera", type=int, default=0, help="Webcam device index (default: 0)")
-    parser.add_argument("--fps", type=float, default=15.0, help="Target processing FPS (default: 15.0)")
+    parser.add_argument("--fps", type=float, default=30.0, help="Target processing FPS (default: 30.0)")
     parser.add_argument("--width", type=int, default=640, help="Capture width (default: 640)")
     parser.add_argument("--height", type=int, default=480, help="Capture height (default: 480)")
     parser.add_argument(
         "--dwell",
         type=float,
-        default=0.25,
-        help="Sustained dwell threshold in seconds (default: 0.25)",
+        default=0.15,
+        help="Sustained dwell threshold in seconds (default: 0.15)",
     )
     parser.add_argument(
         "--ear-threshold",
@@ -100,8 +100,11 @@ def run_daemon(args: argparse.Namespace) -> int:
     dwell_filter = DwellFilter(dwell_threshold_sec=args.dwell)
 
     cap = cv2.VideoCapture(args.camera)
+    # Minimize driver buffer latency to zero by dropping stale frames
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+    cap.set(cv2.CAP_PROP_FPS, args.fps)
 
     if not cap.isOpened():
         logger.error("Unable to open camera index %d", args.camera)
@@ -128,10 +131,11 @@ def run_daemon(args: argparse.Namespace) -> int:
     screen_names = {0: "LEFT", 1: "CENTER", 2: "RIGHT"}
 
     logger.info(
-        "Starting gaze tracking loop (Center: [-%s°, +%s°], Dwell: %.2fs)",
+        "Starting low-latency gaze tracking loop (Center: [-%s°, +%s°], Dwell: %.2fs, Target FPS: %.1f)",
         args.center_span,
         args.center_span,
         args.dwell,
+        args.fps,
     )
     if args.calibrate:
         print("\n--- CALIBRATION MODE (Press Ctrl+C to exit) ---")
@@ -142,7 +146,7 @@ def run_daemon(args: argparse.Namespace) -> int:
             start_loop = time.time()
             ret, frame = cap.read()
             if not ret:
-                time.sleep(0.05)
+                time.sleep(0.01)
                 continue
 
             h, w, _ = frame.shape
@@ -194,7 +198,8 @@ def run_daemon(args: argparse.Namespace) -> int:
 
             elapsed = time.time() - start_loop
             sleep_time = max(0.0, frame_interval - elapsed)
-            time.sleep(sleep_time)
+            if sleep_time > 0.002:
+                time.sleep(sleep_time)
 
     finally:
         if args.calibrate:

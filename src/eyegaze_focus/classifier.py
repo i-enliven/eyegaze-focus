@@ -63,7 +63,7 @@ class ScreenClassifier:
 class DwellFilter:
     """Debounces candidate screen switches by requiring gaze to dwell for a minimum duration."""
 
-    def __init__(self, dwell_threshold_sec: float = 0.25, initial_focused_screen: int | None = None):
+    def __init__(self, dwell_threshold_sec: float = 0.15, initial_focused_screen: int | None = None):
         self.dwell_threshold_sec = dwell_threshold_sec
         self.current_focused_screen = initial_focused_screen
         self.active_target: int | None = None

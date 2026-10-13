@@ -12,9 +12,9 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
 ## Architecture & Pipeline
 
 ```text
-[Webcam (640x480 @ 15fps)]
-           │
-           ▼
+[Webcam (640x480 @ 30fps, zero-buffer)]
+                  │
+                  ▼
 [MediaPipe FaceMesh (refine_landmarks=True)]
      │                                │
      ▼                                ▼
@@ -29,7 +29,7 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
                      │
                      ▼
       [Dwell & Hysteresis State Machine]
-       (Center: [-25°, +25°] by default)
+       (Center: [-25°, +25°], Dwell: 150ms)
                      │
                      ▼
       [IPC / Display Focus Dispatcher]
@@ -40,18 +40,21 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
 ```
 
 ### Key Technical Characteristics
-1. **Physical Gaze Angle Fusion**: Combines head yaw in degrees with bilateral ocular deflection ($\text{Gaze Angle} = \text{Yaw}^\circ + 20^\circ \cdot (\text{Iris} - 0.50)$).
-2. **User-Centric Orientation**:
+1. **Low-Latency Camera Pipeline**:
+   - Camera circular buffer queue is pinned to 1 frame (`CAP_PROP_BUFFERSIZE=1`), eliminating stale driver queues and cutting buffer delay from ~130ms to 0ms.
+   - Paced directly by hardware camera VSYNC at 30 FPS.
+2. **Physical Gaze Angle Fusion**: Combines head yaw in degrees with bilateral ocular deflection ($\text{Gaze Angle} = \text{Yaw}^\circ + 20^\circ \cdot (\text{Iris} - 0.50)$).
+3. **User-Centric Orientation**:
    - Turning to user's **Left** produces positive degrees ($+^\circ$), targeting Left monitor (`Screen 0`).
    - Looking straight at **Center** produces $\approx 0^\circ$, targeting Center monitor (`Screen 1`).
    - Turning to user's **Right** produces negative degrees ($-^\circ$), targeting Right monitor (`Screen 2`).
-3. **Wide Center Deadband**: Center screen spans a full physical angular range (default: **$[-25^\circ, +25^\circ]$**), providing a natural resting zone without accidental focus shifts while reading or looking across the main screen.
-4. **Hysteresis Stability**: Configurable hysteresis boundary (default $5^\circ$):
+4. **Wide Center Deadband**: Center screen spans a full physical angular range (default: **$[-25^\circ, +25^\circ]$**), providing a natural resting zone without accidental focus shifts while reading or looking across the main screen.
+5. **Fast Dwell Debounce**: 150ms dwell requirement (4–5 consecutive confirmation frames at 30 FPS) provides instantaneous transitions while ignoring casual micro-saccades.
+6. **Hysteresis Stability**: Configurable hysteresis boundary (default $5^\circ$):
    - Left Screen: enters at $\ge +25^\circ$, releases at $< +20^\circ$.
    - Right Screen: enters at $\le -25^\circ$, releases at $> -20^\circ$.
-5. **Blink Gating**: Computes Eye Aspect Ratio (EAR). Frames where eyes are closed are skipped to prevent eyelid seam collapses from triggering focus switches.
-6. **Dwell Debounce**: Requires sustained gaze (default: 250ms) before committing focus switches to ignore casual saccades.
-7. **Automatic Multi-Monitor Geometry Discovery**:
+7. **Blink Gating**: Computes Eye Aspect Ratio (EAR). Frames where eyes are closed are skipped to prevent eyelid seam collapses from triggering focus switches.
+8. **Automatic Multi-Monitor Geometry Discovery**:
    - **Linux**: Automatically queries `swaymsg -t get_outputs` (or `i3-msg`) and sorts active displays by `rect.x`.
    - **macOS (yabai)**: Queries `yabai -m query --displays` and sorts displays by `frame.x`.
    - **macOS (osascript)**: Queries `$.NSScreen.screens` via native JXA and sorts by screen `origin.x`.
@@ -89,10 +92,10 @@ If your camera is offset horizontally relative to your center screen (e.g. mount
 uv run eyegaze-focus --calibrate --center-yaw-offset 5.0
 ```
 
-To adjust the angular width of your center display:
+To adjust the angular width of your center display or dwell time:
 
 ```bash
-uv run eyegaze-focus --center-span 30.0 --hysteresis 6.0
+uv run eyegaze-focus --center-span 25.0 --dwell 0.12
 ```
 
 ### CLI Options
@@ -103,8 +106,8 @@ uv run eyegaze-focus --center-span 30.0 --hysteresis 6.0
 | `--calibrate` | `False` | Run interactive terminal monitor without firing IPC |
 | `--dry-run` | `False` | Log IPC commands to stdout without executing them |
 | `--camera` | `0` | V4L2 / AVFoundation webcam device index |
-| `--fps` | `15.0` | Capture and inference frame rate |
-| `--dwell` | `0.25` | Dwell duration in seconds required before switching |
+| `--fps` | `30.0` | Capture and inference frame rate |
+| `--dwell` | `0.15` | Dwell duration in seconds required before switching |
 | `--center-span` | `25.0` | Half-width of center screen deadband in degrees (`[-25°, +25°]`) |
 | `--hysteresis` | `5.0` | Hysteresis margin in degrees before releasing screen focus |
 | `--iris-weight` | `20.0` | Maximum ocular deflection contribution in degrees |
