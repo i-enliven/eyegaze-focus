@@ -1,0 +1,26 @@
+[project]
+name = "eyegaze-focus"
+version = "0.1.0"
+description = "Lightweight gaze-driven screen focus daemon for Sway and i3 tiling window managers"
+readme = "README.md"
+authors = [
+    { name = "Andre Wanderley de Souza", email = "ienliven@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mediapipe==0.10.14",
+    "numpy>=2.5.4",
+    "opencv-python>=5.0.0.93",
+]
+
+[project.scripts]
+eyegaze-focus = "eyegaze_focus.daemon:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
