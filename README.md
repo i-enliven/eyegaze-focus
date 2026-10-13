@@ -16,48 +16,48 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
                   │
                   ▼
 [MediaPipe FaceMesh (refine_landmarks=True)]
-     │                                │
-     ▼                                ▼
-[Blink Gate (EAR < 0.20)]      [Head Pose (solvePnP Yaw)]
-     │ (Pass if open)                 │
-     ▼                                ▼
-[Bilateral Iris Ratio]         [User-Centric Yaw (+Left, -Right)]
-     │                                │
-     └───────────────┬────────────────┘
-                     ▼
-         [Combined Gaze Angle (°)]
-                     │
-                     ▼
-      [Dwell & Hysteresis State Machine]
-       (Center: [-25°, +25°], Dwell: 150ms)
-                     │
-                     ▼
-      [IPC / Display Focus Dispatcher]
-   ┌─────────────────┼──────────────────┐
-   ▼                 ▼                  ▼
-[Sway / i3]       [yabai]          [osascript]
-(Linux IPC)     (macOS TWM)     (macOS Fallback)
+     │                    │             │
+     ▼                    ▼             ▼
+[Blink Gate]        [Head Pitch]   [Head Yaw]
+ (EAR < 0.20)      (Keyboard Look) (User-Centric: +Left, -Right)
+     │                    │             │
+     │       [Pitch >= 25°? Freeze]     │
+     ▼                    │             ▼
+[Bilateral Iris Ratio]    │     [Combined Gaze Angle (°)]
+     │                    │             │
+     └────────────────────┴─────────────┤
+                                        ▼
+                        [Dwell & Hysteresis State Machine]
+                         (Center: [-25°, +25°], Dwell: 150ms)
+                                        │
+                                        ▼
+                        [IPC / Display Focus Dispatcher]
+                     ┌──────────────────┼──────────────────┐
+                     ▼                  ▼                  ▼
+                  [Sway / i3]        [yabai]          [osascript]
+                  (Linux IPC)      (macOS TWM)     (macOS Fallback)
 ```
 
 ### Key Technical Characteristics
 1. **Low-Latency Camera Pipeline**:
-   - Camera circular buffer queue is pinned to 1 frame (`CAP_PROP_BUFFERSIZE=1`), eliminating stale driver queues and cutting buffer delay from ~130ms to 0ms.
-   - Paced directly by hardware camera VSYNC at 30 FPS.
+   * Camera circular buffer queue is pinned to 1 frame (`CAP_PROP_BUFFERSIZE=1`), eliminating stale driver queues and cutting buffer delay from ~130ms to 0ms.
+   * Paced directly by hardware camera VSYNC at 30 FPS.
 2. **Physical Gaze Angle Fusion**: Combines head yaw in degrees with bilateral ocular deflection ($\text{Gaze Angle} = \text{Yaw}^\circ + 20^\circ \cdot (\text{Iris} - 0.50)$).
-3. **User-Centric Orientation**:
-   - Turning to user's **Left** produces positive degrees ($+^\circ$), targeting Left monitor (`Screen 0`).
-   - Looking straight at **Center** produces $\approx 0^\circ$, targeting Center monitor (`Screen 1`).
-   - Turning to user's **Right** produces negative degrees ($-^\circ$), targeting Right monitor (`Screen 2`).
-4. **Wide Center Deadband**: Center screen spans a full physical angular range (default: **$[-25^\circ, +25^\circ]$**), providing a natural resting zone without accidental focus shifts while reading or looking across the main screen.
-5. **Fast Dwell Debounce**: 150ms dwell requirement (4–5 consecutive confirmation frames at 30 FPS) provides instantaneous transitions while ignoring casual micro-saccades.
-6. **Hysteresis Stability**: Configurable hysteresis boundary (default $5^\circ$):
-   - Left Screen: enters at $\ge +25^\circ$, releases at $< +20^\circ$.
-   - Right Screen: enters at $\le -25^\circ$, releases at $> -20^\circ$.
-7. **Blink Gating**: Computes Eye Aspect Ratio (EAR). Frames where eyes are closed are skipped to prevent eyelid seam collapses from triggering focus switches.
-8. **Automatic Multi-Monitor Geometry Discovery**:
-   - **Linux**: Automatically queries `swaymsg -t get_outputs` (or `i3-msg`) and sorts active displays by `rect.x`.
-   - **macOS (yabai)**: Queries `yabai -m query --displays` and sorts displays by `frame.x`.
-   - **macOS (osascript)**: Queries `$.NSScreen.screens` via native JXA and sorts by screen `origin.x`.
+3. **Keyboard Glance Gating (`pitch_down_ignore`)**: Automatically pauses gaze transitions whenever your head tilts downward (e.g. past $+25^\circ$) to look at your keyboard or desk, preventing accidental focus shifts while typing.
+4. **User-Centric Orientation**:
+   * Turning to user's **Left** produces positive degrees ($+^\circ$), targeting Left monitor (`Screen 0`).
+   * Looking straight at **Center** produces $\approx 0^\circ$, targeting Center monitor (`Screen 1`).
+   * Turning to user's **Right** produces negative degrees ($-^\circ$), targeting Right monitor (`Screen 2`).
+5. **Wide Center Deadband**: Center screen spans a full physical angular range (default: **$[-25^\circ, +25^\circ]$**), providing a natural resting zone without accidental focus shifts while reading across the main screen.
+6. **Fast Dwell Debounce**: 150ms dwell requirement (4–5 consecutive confirmation frames at 30 FPS) provides instantaneous transitions while ignoring casual micro-saccades.
+7. **Hysteresis Stability**: Configurable hysteresis boundary (default $5^\circ$):
+   * Left Screen: enters at $\ge +25^\circ$, releases at $< +20^\circ$.
+   * Right Screen: enters at $\le -25^\circ$, releases at $> -20^\circ$.
+8. **Blink Gating**: Computes Eye Aspect Ratio (EAR). Frames where eyes are closed are skipped to prevent eyelid seam collapses from triggering focus switches.
+9. **Automatic Multi-Monitor Geometry Discovery**:
+   * **Linux**: Queries `swaymsg -t get_outputs` (or `i3-msg`) and sorts active displays by `rect.x`.
+   * **macOS (yabai)**: Queries `yabai -m query --displays` and sorts displays by `frame.x`.
+   * **macOS (osascript)**: Queries `$.NSScreen.screens` via native JXA and sorts by screen `origin.x`.
 
 ---
 
@@ -73,48 +73,124 @@ uv sync
 
 ---
 
-## Calibration
+## Configuration Guide
 
-Run in calibration mode to inspect live metrics:
+`eyegaze-focus` supports a human-editable TOML configuration file.
 
-```bash
-uv run eyegaze-focus --calibrate
-```
+### Default Configuration Location
+* **Linux / macOS**: `~/.config/eyegaze-focus/config.toml` (respects `$XDG_CONFIG_HOME`)
 
-Sample output:
-```text
-EAR: 0.28 | Head:  +8.2° | Iris: 0.51 | Gaze Angle:  +8.4° -> CENTER (eDP-1)
-```
+### Precedence Hierarchy
+Settings are resolved in three tiers:
+$$\text{CLI Flags} > \text{config.toml} > \text{Hardcoded Defaults}$$
 
-If your camera is offset horizontally relative to your center screen (e.g. mounted to the side), note the resting Yaw shown when looking directly at your center monitor, and supply it via `--center-yaw-offset`:
-
-```bash
-uv run eyegaze-focus --calibrate --center-yaw-offset 5.0
-```
-
-To adjust the angular width of your center display or dwell time:
+### Generating a Default Configuration File
+Run with `--save-config` to generate a formatted, commented `config.toml`:
 
 ```bash
-uv run eyegaze-focus --center-span 25.0 --dwell 0.12
+uv run eyegaze-focus --save-config
 ```
 
-### CLI Options
+You can also pass custom values while saving:
+```bash
+uv run eyegaze-focus --center-span 28.0 --pitch-down-ignore 30.0 --save-config
+```
+
+### Example `config.toml` Reference
+
+```toml
+# eyegaze-focus configuration file
+# Location: ~/.config/eyegaze-focus/config.toml
+
+[tracking]
+# Video capture device index (0 = default webcam)
+camera = 0
+
+# Capture and inference frame rate
+fps = 30.0
+
+# Capture resolution
+width = 640
+height = 480
+
+# Dwell duration required before switching focus (seconds)
+dwell = 0.15
+
+# Eye Aspect Ratio threshold (frames below this are skipped as blinks)
+ear_threshold = 0.20
+
+# Ignore gaze focus switches when head tilts downward past this angle (looking at keyboard)
+pitch_down_ignore = 25.0
+
+[geometry]
+# Half-width of center screen deadband in degrees (center spans [-25.0°, +25.0°])
+center_span = 25.0
+
+# Hysteresis margin in degrees before releasing focus back to center
+hysteresis = 5.0
+
+# Maximum ocular deflection contribution in degrees
+iris_weight = 20.0
+
+# Baseline head yaw offset in degrees to compensate for camera positioning
+center_yaw_offset = 0.0
+
+[backend]
+# Window manager display backend: "auto", "sway", "i3", "yabai", or "osascript"
+name = "auto"
+```
+
+---
+
+## Calibration & Tuning Workflow
+
+1. **Start Calibration Mode**:
+   ```bash
+   uv run eyegaze-focus --calibrate
+   ```
+   *(Suppresses all window manager IPC calls so your screen focus will not shift while inspecting values).*
+
+2. **Calibrate Center Display**:
+   Look naturally across your center monitor from left edge to right edge. Observe `Gaze Angle` on the terminal status line:
+   ```text
+   EAR: 0.28 | Yaw:  +6.2° | Pitch: +12.0° | Iris: 0.51 | Gaze:  +6.4° -> CENTER (eDP-1)
+   ```
+   * If your gaze angle reaches $\pm 28^\circ$ on wide screens, increase `center_span` to `30.0`:
+     ```bash
+     uv run eyegaze-focus --center-span 30.0 --save-config
+     ```
+   * If your camera is mounted off-center and sitting straight shows e.g. `Yaw: +4.0°`, set `center_yaw_offset`:
+     ```bash
+     uv run eyegaze-focus --center-yaw-offset 4.0 --save-config
+     ```
+
+3. **Calibrate Keyboard Ignore Threshold**:
+   Look down at your keyboard as you would while typing. Note the `Pitch` reading:
+   ```text
+   EAR: 0.28 | Pitch: +28.5° | [KEYBOARD LOOK (>= 25°) - FOCUS PAUSED]
+   ```
+   * If keyboard look triggers prematurely while looking at the bottom of your screen, raise `pitch_down_ignore` (e.g. `30.0` or `35.0`).
+   * If typing still occasionally shifts focus, lower it (e.g. `20.0` or `22.0`).
+
+---
+
+## CLI Options
 
 | Flag | Default | Description |
 |---|---|---|
+| `--config` | `~/.config/.../config.toml` | Custom path to TOML configuration file |
+| `--save-config` | `False` | Write active settings to config file and exit |
+| `--pitch-down-ignore` | `25.0` | Downward pitch in degrees to ignore gaze (keyboard look) |
+| `--center-span` | `25.0` | Half-width of center screen deadband in degrees (`[-25°, +25°]`) |
+| `--hysteresis` | `5.0` | Hysteresis margin in degrees before releasing screen focus |
+| `--center-yaw-offset` | `0.0` | Baseline offset in degrees subtracted from raw head yaw |
+| `--dwell` | `0.15` | Dwell duration in seconds required before switching |
+| `--fps` | `30.0` | Capture and inference frame rate |
+| `--iris-weight` | `20.0` | Maximum ocular deflection contribution in degrees |
+| `--camera` | `0` | V4L2 / AVFoundation webcam device index |
 | `--backend` | `auto` | Display backend (`auto`, `sway`, `i3`, `yabai`, `osascript`) |
 | `--calibrate` | `False` | Run interactive terminal monitor without firing IPC |
 | `--dry-run` | `False` | Log IPC commands to stdout without executing them |
-| `--camera` | `0` | V4L2 / AVFoundation webcam device index |
-| `--fps` | `30.0` | Capture and inference frame rate |
-| `--dwell` | `0.15` | Dwell duration in seconds required before switching |
-| `--center-span` | `25.0` | Half-width of center screen deadband in degrees (`[-25°, +25°]`) |
-| `--hysteresis` | `5.0` | Hysteresis margin in degrees before releasing screen focus |
-| `--iris-weight` | `20.0` | Maximum ocular deflection contribution in degrees |
-| `--center-yaw-offset` | `0.0` | Baseline offset in degrees subtracted from raw head yaw |
-| `--ear-threshold` | `0.20` | Minimum EAR below which frame is discarded as a blink |
-| `--width` | `640` | Video capture width |
-| `--height` | `480` | Video capture height |
 | `-v, --verbose` | `False` | Enable debug logging |
 
 ---
@@ -138,8 +214,8 @@ Add to your `~/.yabairc`:
 /path/to/eyegaze-focus/.venv/bin/eyegaze-focus &
 ```
 
-> **Note on macOS Permissions**:
-> On first run, macOS will prompt for Camera access for your terminal emulator (Terminal, iTerm2, Kitty). Grant permission in **System Settings > Privacy & Security > Camera**.
+> **macOS Permissions**:
+> On first run, macOS will prompt for Camera access for your terminal emulator. Grant permission in **System Settings > Privacy & Security > Camera**.
 
 ---
 

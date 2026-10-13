@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+from pathlib import Path
 import signal
 import sys
 import time
@@ -10,10 +11,11 @@ import cv2
 import mediapipe as mp
 
 from eyegaze_focus.classifier import DwellFilter, ScreenClassifier
+from eyegaze_focus.config import get_default_config_path, load_config, save_config
 from eyegaze_focus.geometry import (
     calculate_ear,
     compute_gaze_angle_deg,
-    estimate_head_yaw,
+    estimate_head_pose,
     get_bilateral_iris_ratio,
 )
 from eyegaze_focus.ipc import IpcClient
@@ -22,53 +24,98 @@ logger = logging.getLogger("eyegaze_focus")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    # First pass to discover if --config was specified
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", type=Path, default=None)
+    pre_args, _ = pre_parser.parse_known_args(argv)
+
+    config_path = pre_args.config or get_default_config_path()
+    cfg = load_config(config_path)
+
     parser = argparse.ArgumentParser(
         description="Gaze-driven discrete display focus daemon for Sway, i3, and macOS.",
     )
-    parser.add_argument("--camera", type=int, default=0, help="Webcam device index (default: 0)")
-    parser.add_argument("--fps", type=float, default=30.0, help="Target processing FPS (default: 30.0)")
-    parser.add_argument("--width", type=int, default=640, help="Capture width (default: 640)")
-    parser.add_argument("--height", type=int, default=480, help="Capture height (default: 480)")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=config_path,
+        help=f"Path to TOML configuration file (default: {config_path})",
+    )
+    parser.add_argument(
+        "--save-config",
+        action="store_true",
+        help="Save current configuration to the config file and exit",
+    )
+    parser.add_argument(
+        "--camera",
+        type=int,
+        default=cfg.get("camera", 0),
+        help="Webcam device index (default: 0)",
+    )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=cfg.get("fps", 30.0),
+        help="Target processing FPS (default: 30.0)",
+    )
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=cfg.get("width", 640),
+        help="Capture width (default: 640)",
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=cfg.get("height", 480),
+        help="Capture height (default: 480)",
+    )
     parser.add_argument(
         "--dwell",
         type=float,
-        default=0.15,
+        default=cfg.get("dwell", 0.15),
         help="Sustained dwell threshold in seconds (default: 0.15)",
     )
     parser.add_argument(
         "--ear-threshold",
         type=float,
-        default=0.20,
+        default=cfg.get("ear_threshold", 0.20),
         help="Eye Aspect Ratio threshold below which eye is considered closed (default: 0.20)",
     )
     parser.add_argument(
         "--center-span",
         type=float,
-        default=25.0,
+        default=cfg.get("center_span", 25.0),
         help="Half-width of center screen deadband in degrees (default: 25.0 -> [-25°, +25°])",
     )
     parser.add_argument(
         "--hysteresis",
         type=float,
-        default=5.0,
+        default=cfg.get("hysteresis", 5.0),
         help="Hysteresis margin in degrees before releasing screen focus (default: 5.0)",
     )
     parser.add_argument(
         "--iris-weight",
         type=float,
-        default=20.0,
+        default=cfg.get("iris_weight", 20.0),
         help="Maximum ocular deflection contribution in degrees (default: 20.0)",
     )
     parser.add_argument(
         "--center-yaw-offset",
         type=float,
-        default=0.0,
+        default=cfg.get("center_yaw_offset", 0.0),
         help="Offset in degrees to subtract from raw head yaw for center baseline (default: 0.0)",
+    )
+    parser.add_argument(
+        "--pitch-down-ignore",
+        type=float,
+        default=cfg.get("pitch_down_ignore", 25.0),
+        help="Downward head pitch threshold in degrees to ignore gaze (looking at keyboard) (default: 25.0)",
     )
     parser.add_argument(
         "--backend",
         choices=["auto", "sway", "i3", "yabai", "osascript"],
-        default="auto",
+        default=cfg.get("backend", "auto"),
         help="Window manager display focus backend (default: auto)",
     )
     parser.add_argument(
@@ -93,6 +140,26 @@ def run_daemon(args: argparse.Namespace) -> int:
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(message)s")
 
+    if args.save_config:
+        values = {
+            "camera": args.camera,
+            "fps": args.fps,
+            "width": args.width,
+            "height": args.height,
+            "dwell": args.dwell,
+            "ear_threshold": args.ear_threshold,
+            "pitch_down_ignore": args.pitch_down_ignore,
+            "center_span": args.center_span,
+            "hysteresis": args.hysteresis,
+            "iris_weight": args.iris_weight,
+            "center_yaw_offset": args.center_yaw_offset,
+            "backend": args.backend,
+        }
+        saved_path = save_config(values, args.config)
+        logger.info("Saved configuration to %s", saved_path)
+        print(f"Configuration successfully saved to {saved_path}")
+        return 0
+
     ipc_client = IpcClient(backend=args.backend, dry_run=args.dry_run or args.calibrate)
     logger.info("Using backend: %s | Detected outputs: %s", ipc_client.backend.name, ipc_client.outputs)
 
@@ -100,7 +167,6 @@ def run_daemon(args: argparse.Namespace) -> int:
     dwell_filter = DwellFilter(dwell_threshold_sec=args.dwell)
 
     cap = cv2.VideoCapture(args.camera)
-    # Minimize driver buffer latency to zero by dropping stale frames
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
@@ -138,8 +204,8 @@ def run_daemon(args: argparse.Namespace) -> int:
         args.fps,
     )
     if args.calibrate:
-        print("\n--- CALIBRATION MODE (Press Ctrl+C to exit) ---")
-        print("Format: [EAR] [Head Yaw] [Iris Ratio] [Gaze Angle] -> Screen (Output)\n")
+        print(f"\n--- CALIBRATION MODE (Press Ctrl+C to exit) | Config: {args.config} ---")
+        print("Format: [EAR] [Yaw / Pitch] [Iris Ratio] [Gaze Angle] -> Screen (Output)\n")
 
     try:
         while running and cap.isOpened():
@@ -158,8 +224,20 @@ def run_daemon(args: argparse.Namespace) -> int:
                 _, _, avg_ear = calculate_ear(landmarks, w, h)
 
                 if avg_ear >= args.ear_threshold:
+                    head_yaw, head_pitch = estimate_head_pose(landmarks, w, h)
+
+                    # Check if user is looking down at keyboard
+                    if head_pitch >= args.pitch_down_ignore:
+                        if args.calibrate:
+                            sys.stdout.write(
+                                f"\rEAR: {avg_ear:.2f} | Pitch: {head_pitch:+5.1f}° | "
+                                f"[KEYBOARD LOOK (>= {args.pitch_down_ignore:.0f}°) - FOCUS PAUSED]{' ' * 20}"
+                            )
+                            sys.stdout.flush()
+                        # Do not update dwell filter; freeze current focus
+                        continue
+
                     iris_ratio = get_bilateral_iris_ratio(landmarks, w, h)
-                    head_yaw = estimate_head_yaw(landmarks, w, h)
                     gaze_angle = compute_gaze_angle_deg(
                         iris_ratio=iris_ratio,
                         head_yaw_deg=head_yaw,
@@ -172,9 +250,9 @@ def run_daemon(args: argparse.Namespace) -> int:
                     if args.calibrate:
                         effective_yaw = head_yaw - args.center_yaw_offset
                         sys.stdout.write(
-                            f"\rEAR: {avg_ear:.2f} | Head: {effective_yaw:+5.1f}° | Iris: {iris_ratio:.2f} | "
-                            f"Gaze Angle: {gaze_angle:+5.1f}° -> {screen_names.get(detected_screen, '?'):<6} "
-                            f"({output_name})"
+                            f"\rEAR: {avg_ear:.2f} | Yaw: {effective_yaw:+5.1f}° | Pitch: {head_pitch:+5.1f}° | "
+                            f"Iris: {iris_ratio:.2f} | Gaze: {gaze_angle:+5.1f}° -> "
+                            f"{screen_names.get(detected_screen, '?'):<6} ({output_name}){' ' * 10}"
                         )
                         sys.stdout.flush()
                     else:

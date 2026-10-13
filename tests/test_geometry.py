@@ -10,6 +10,7 @@ from eyegaze_focus.geometry import (
     FACE_3D_MODEL,
     calculate_ear,
     compute_gaze_angle_deg,
+    estimate_head_pose,
     estimate_head_yaw,
     get_bilateral_iris_ratio,
 )
@@ -153,6 +154,29 @@ def test_estimate_head_yaw_synthetic():
     landmarks_left = _make_mock_landmarks(landmark_map_left)
     yaw_left = estimate_head_yaw(landmarks_left, w, h)
     assert yaw_left == pytest.approx(15.0, abs=1.0)
+
+
+def test_estimate_head_pose_pitch_synthetic():
+    w, h = 640.0, 480.0
+    cam_matrix = np.array([[w, 0.0, w / 2], [0.0, w, h / 2], [0.0, 0.0, 1.0]], dtype=np.float64)
+    dist_coeffs = np.zeros((4, 1), dtype=np.float64)
+    tvec = np.array([[0.0], [0.0], [1000.0]], dtype=np.float64)
+
+    # Tilting head DOWN towards keyboard (+25 deg around X in camera space)
+    rvec_down = np.array([[np.radians(25.0)], [0.0], [0.0]], dtype=np.float64)
+    pts_down, _ = cv2.projectPoints(FACE_3D_MODEL, rvec_down, tvec, cam_matrix, dist_coeffs)
+    landmark_map_down = {
+        1: (pts_down[0, 0, 0] / w, pts_down[0, 0, 1] / h),
+        199: (pts_down[1, 0, 0] / w, pts_down[1, 0, 1] / h),
+        33: (pts_down[2, 0, 0] / w, pts_down[2, 0, 1] / h),
+        263: (pts_down[3, 0, 0] / w, pts_down[3, 0, 1] / h),
+        61: (pts_down[4, 0, 0] / w, pts_down[4, 0, 1] / h),
+        291: (pts_down[5, 0, 0] / w, pts_down[5, 0, 1] / h),
+    }
+    landmarks_down = _make_mock_landmarks(landmark_map_down)
+    yaw, pitch = estimate_head_pose(landmarks_down, w, h)
+    assert yaw == pytest.approx(0.0, abs=1.0)
+    assert pitch == pytest.approx(25.0, abs=1.0)
 
 
 def test_compute_gaze_angle_deg():
