@@ -1,8 +1,11 @@
 # eyegaze-focus
 
-Lightweight gaze-driven screen focus daemon for **Sway** and **i3** tiling window managers.
+Lightweight gaze-driven screen focus daemon for **Sway**, **i3**, and **macOS** (**yabai** with native **osascript** fallback).
 
-Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focus` uses coarse discrete classification: **Left (0)**, **Center (1)**, or **Right (2)** mapped directly to window manager IPC calls (`swaymsg focus output <NAME>` or `i3-msg focus output <NAME>`).
+Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focus` uses coarse discrete classification: **Left (0)**, **Center (1)**, or **Right (2)** mapped directly to window manager IPC calls:
+* **Sway / i3**: `swaymsg focus output <NAME>` / `i3-msg focus output <NAME>`
+* **macOS (yabai)**: `yabai -m display --focus <INDEX>`
+* **macOS (native fallback)**: `osascript` (JXA / CoreGraphics mouse-warp focus)
 
 ---
 
@@ -29,7 +32,11 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
        (Center: [-25°, +25°] by default)
                      │
                      ▼
-       [swaymsg / i3-msg focus output]
+      [IPC / Display Focus Dispatcher]
+   ┌─────────────────┼──────────────────┐
+   ▼                 ▼                  ▼
+[Sway / i3]       [yabai]          [osascript]
+(Linux IPC)     (macOS TWM)     (macOS Fallback)
 ```
 
 ### Key Technical Characteristics
@@ -44,7 +51,10 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
    - Right Screen: enters at $\le -25^\circ$, releases at $> -20^\circ$.
 5. **Blink Gating**: Computes Eye Aspect Ratio (EAR). Frames where eyes are closed are skipped to prevent eyelid seam collapses from triggering focus switches.
 6. **Dwell Debounce**: Requires sustained gaze (default: 250ms) before committing focus switches to ignore casual saccades.
-7. **Automatic Output Geometry Discovery**: Automatically queries `swaymsg -t get_outputs` (or `i3-msg`), filters active monitors, and sorts them horizontally by `rect.x` coordinate.
+7. **Automatic Multi-Monitor Geometry Discovery**:
+   - **Linux**: Automatically queries `swaymsg -t get_outputs` (or `i3-msg`) and sorts active displays by `rect.x`.
+   - **macOS (yabai)**: Queries `yabai -m query --displays` and sorts displays by `frame.x`.
+   - **macOS (osascript)**: Queries `$.NSScreen.screens` via native JXA and sorts by screen `origin.x`.
 
 ---
 
@@ -89,9 +99,10 @@ uv run eyegaze-focus --center-span 30.0 --hysteresis 6.0
 
 | Flag | Default | Description |
 |---|---|---|
+| `--backend` | `auto` | Display backend (`auto`, `sway`, `i3`, `yabai`, `osascript`) |
 | `--calibrate` | `False` | Run interactive terminal monitor without firing IPC |
 | `--dry-run` | `False` | Log IPC commands to stdout without executing them |
-| `--camera` | `0` | V4L2 webcam device index (`/dev/video0`) |
+| `--camera` | `0` | V4L2 / AVFoundation webcam device index |
 | `--fps` | `15.0` | Capture and inference frame rate |
 | `--dwell` | `0.25` | Dwell duration in seconds required before switching |
 | `--center-span` | `25.0` | Half-width of center screen deadband in degrees (`[-25°, +25°]`) |
@@ -105,13 +116,27 @@ uv run eyegaze-focus --center-span 30.0 --hysteresis 6.0
 
 ---
 
-## Sway / i3 Configuration
+## Window Manager Integration
+
+### Sway / i3 (Linux)
 
 Add the daemon to your Sway config (`~/.config/sway/config`) or i3 config:
 
 ```text
 exec_always --no-startup-id /path/to/eyegaze-focus/.venv/bin/eyegaze-focus
 ```
+
+### yabai / macOS
+
+Add to your `~/.yabairc`:
+
+```bash
+# Start eyegaze-focus daemon in background
+/path/to/eyegaze-focus/.venv/bin/eyegaze-focus &
+```
+
+> **Note on macOS Permissions**:
+> On first run, macOS will prompt for Camera access for your terminal emulator (Terminal, iTerm2, Kitty). Grant permission in **System Settings > Privacy & Security > Camera**.
 
 ---
 

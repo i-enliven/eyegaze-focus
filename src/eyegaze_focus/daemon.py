@@ -23,7 +23,7 @@ logger = logging.getLogger("eyegaze_focus")
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Gaze-driven discrete display focus daemon for Sway and i3.",
+        description="Gaze-driven discrete display focus daemon for Sway, i3, and macOS.",
     )
     parser.add_argument("--camera", type=int, default=0, help="Webcam device index (default: 0)")
     parser.add_argument("--fps", type=float, default=15.0, help="Target processing FPS (default: 15.0)")
@@ -66,6 +66,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Offset in degrees to subtract from raw head yaw for center baseline (default: 0.0)",
     )
     parser.add_argument(
+        "--backend",
+        choices=["auto", "sway", "i3", "yabai", "osascript"],
+        default="auto",
+        help="Window manager display focus backend (default: auto)",
+    )
+    parser.add_argument(
         "--calibrate",
         action="store_true",
         help="Run in interactive calibration mode without dispatching IPC commands",
@@ -87,8 +93,8 @@ def run_daemon(args: argparse.Namespace) -> int:
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    ipc_client = IpcClient(dry_run=args.dry_run or args.calibrate)
-    logger.info("Detected outputs: %s", ipc_client.outputs)
+    ipc_client = IpcClient(backend=args.backend, dry_run=args.dry_run or args.calibrate)
+    logger.info("Using backend: %s | Detected outputs: %s", ipc_client.backend.name, ipc_client.outputs)
 
     classifier = ScreenClassifier(center_span_deg=args.center_span, hysteresis_deg=args.hysteresis)
     dwell_filter = DwellFilter(dwell_threshold_sec=args.dwell)
