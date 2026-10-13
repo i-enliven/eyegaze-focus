@@ -12,7 +12,7 @@ import mediapipe as mp
 from eyegaze_focus.classifier import DwellFilter, ScreenClassifier
 from eyegaze_focus.geometry import (
     calculate_ear,
-    compute_gaze_score,
+    compute_gaze_angle_deg,
     estimate_head_yaw,
     get_bilateral_iris_ratio,
 )
@@ -42,10 +42,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Eye Aspect Ratio threshold below which eye is considered closed (default: 0.20)",
     )
     parser.add_argument(
-        "--yaw-weight",
+        "--center-span",
         type=float,
-        default=0.015,
-        help="Weight multiplier for head yaw in composite gaze score (default: 0.015)",
+        default=25.0,
+        help="Half-width of center screen deadband in degrees (default: 25.0 -> [-25°, +25°])",
+    )
+    parser.add_argument(
+        "--hysteresis",
+        type=float,
+        default=5.0,
+        help="Hysteresis margin in degrees before releasing screen focus (default: 5.0)",
+    )
+    parser.add_argument(
+        "--iris-weight",
+        type=float,
+        default=20.0,
+        help="Maximum ocular deflection contribution in degrees (default: 20.0)",
     )
     parser.add_argument(
         "--center-yaw-offset",
@@ -78,7 +90,7 @@ def run_daemon(args: argparse.Namespace) -> int:
     ipc_client = IpcClient(dry_run=args.dry_run or args.calibrate)
     logger.info("Detected outputs: %s", ipc_client.outputs)
 
-    classifier = ScreenClassifier()
+    classifier = ScreenClassifier(center_span_deg=args.center_span, hysteresis_deg=args.hysteresis)
     dwell_filter = DwellFilter(dwell_threshold_sec=args.dwell)
 
     cap = cv2.VideoCapture(args.camera)
@@ -109,10 +121,15 @@ def run_daemon(args: argparse.Namespace) -> int:
     frame_interval = 1.0 / max(1.0, args.fps)
     screen_names = {0: "LEFT", 1: "CENTER", 2: "RIGHT"}
 
-    logger.info("Starting gaze tracking loop (FPS: %.1f, Dwell: %.2fs)", args.fps, args.dwell)
+    logger.info(
+        "Starting gaze tracking loop (Center: [-%s°, +%s°], Dwell: %.2fs)",
+        args.center_span,
+        args.center_span,
+        args.dwell,
+    )
     if args.calibrate:
         print("\n--- CALIBRATION MODE (Press Ctrl+C to exit) ---")
-        print("Format: [EAR] [Yaw Deg] [Iris Ratio] [Gaze Score] -> Screen (Output)\n")
+        print("Format: [EAR] [Head Yaw] [Iris Ratio] [Gaze Angle] -> Screen (Output)\n")
 
     try:
         while running and cap.isOpened():
@@ -133,20 +150,20 @@ def run_daemon(args: argparse.Namespace) -> int:
                 if avg_ear >= args.ear_threshold:
                     iris_ratio = get_bilateral_iris_ratio(landmarks, w, h)
                     head_yaw = estimate_head_yaw(landmarks, w, h)
-                    score = compute_gaze_score(
-                        iris_ratio,
-                        head_yaw,
-                        yaw_weight=args.yaw_weight,
+                    gaze_angle = compute_gaze_angle_deg(
+                        iris_ratio=iris_ratio,
+                        head_yaw_deg=head_yaw,
+                        iris_weight_deg=args.iris_weight,
                         yaw_offset_deg=args.center_yaw_offset,
                     )
-                    detected_screen = classifier.classify(score)
+                    detected_screen = classifier.classify(gaze_angle)
                     output_name = ipc_client.get_output_for_screen(detected_screen)
 
                     if args.calibrate:
                         effective_yaw = head_yaw - args.center_yaw_offset
                         sys.stdout.write(
-                            f"\rEAR: {avg_ear:.2f} | Yaw: {effective_yaw:+5.1f}° | Iris: {iris_ratio:.2f} | "
-                            f"Score: {score:.2f} -> {screen_names.get(detected_screen, '?'):<6} "
+                            f"\rEAR: {avg_ear:.2f} | Head: {effective_yaw:+5.1f}° | Iris: {iris_ratio:.2f} | "
+                            f"Gaze Angle: {gaze_angle:+5.1f}° -> {screen_names.get(detected_screen, '?'):<6} "
                             f"({output_name})"
                         )
                         sys.stdout.flush()

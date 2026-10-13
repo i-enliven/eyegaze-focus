@@ -17,30 +17,34 @@ Instead of performing high-frequency, jittery 2D cursor emulation, `eyegaze-focu
      ▼                                ▼
 [Blink Gate (EAR < 0.20)]      [Head Pose (solvePnP Yaw)]
      │ (Pass if open)                 │
-     ▼                                │
-[Bilateral Iris Ratio]                │
+     ▼                                ▼
+[Bilateral Iris Ratio]         [User-Centric Yaw (+Left, -Right)]
      │                                │
      └───────────────┬────────────────┘
                      ▼
-       [Composite Horizontal Score]
+         [Combined Gaze Angle (°)]
                      │
                      ▼
       [Dwell & Hysteresis State Machine]
+       (Center: [-25°, +25°] by default)
                      │
                      ▼
        [swaymsg / i3-msg focus output]
 ```
 
 ### Key Technical Characteristics
-1. **Composite Gaze Fusion**: Fuses bilateral eye iris ratios with 3D Head Pose yaw estimation (`cv2.solvePnP` using canonical 3D facial anchors and `cv2.decomposeProjectionMatrix`). This prevents misclassification caused by natural head turns where irises re-center in eye sockets.
-2. **Bilateral Tracking**: Simultaneously tracks both eyes to avoid epicanthic occlusion errors when looking to lateral extremes.
-3. **Blink Gating**: Computes Eye Aspect Ratio (EAR). Frames where eyes are closed are skipped to prevent eyelid seam landmark collapse from corrupting the dwell state machine.
-4. **Hysteresis Boundaries**: Dual entry and exit thresholds prevent oscillation along screen borders:
-   - Left Screen: enters at `score >= 0.60`, exits at `score < 0.55`.
-   - Right Screen: enters at `score <= 0.40`, exits at `score > 0.45`.
-   - Center Screen: resting interval between hysteresis thresholds.
-5. **Dwell Debounce**: Requires sustained gaze (default: 250ms) before committing focus switches to ignore casual saccades.
-6. **Automatic Output Geometry Discovery**: Automatically queries `swaymsg -t get_outputs` (or `i3-msg`), filters active monitors, and sorts them horizontally by `rect.x` coordinate.
+1. **Physical Gaze Angle Fusion**: Combines head yaw in degrees with bilateral ocular deflection ($\text{Gaze Angle} = \text{Yaw}^\circ + 20^\circ \cdot (\text{Iris} - 0.50)$).
+2. **User-Centric Orientation**:
+   - Turning to user's **Left** produces positive degrees ($+^\circ$), targeting Left monitor (`Screen 0`).
+   - Looking straight at **Center** produces $\approx 0^\circ$, targeting Center monitor (`Screen 1`).
+   - Turning to user's **Right** produces negative degrees ($-^\circ$), targeting Right monitor (`Screen 2`).
+3. **Wide Center Deadband**: Center screen spans a full physical angular range (default: **$[-25^\circ, +25^\circ]$**), providing a natural resting zone without accidental focus shifts while reading or looking across the main screen.
+4. **Hysteresis Stability**: Configurable hysteresis boundary (default $5^\circ$):
+   - Left Screen: enters at $\ge +25^\circ$, releases at $< +20^\circ$.
+   - Right Screen: enters at $\le -25^\circ$, releases at $> -20^\circ$.
+5. **Blink Gating**: Computes Eye Aspect Ratio (EAR). Frames where eyes are closed are skipped to prevent eyelid seam collapses from triggering focus switches.
+6. **Dwell Debounce**: Requires sustained gaze (default: 250ms) before committing focus switches to ignore casual saccades.
+7. **Automatic Output Geometry Discovery**: Automatically queries `swaymsg -t get_outputs` (or `i3-msg`), filters active monitors, and sorts them horizontally by `rect.x` coordinate.
 
 ---
 
@@ -58,7 +62,7 @@ uv sync
 
 ## Calibration
 
-Run in calibration mode to inspect live metrics and tune thresholds for your physical monitor layout and webcam angle:
+Run in calibration mode to inspect live metrics:
 
 ```bash
 uv run eyegaze-focus --calibrate
@@ -66,13 +70,19 @@ uv run eyegaze-focus --calibrate
 
 Sample output:
 ```text
-EAR: 0.28 | Yaw:  +1.2° | Iris: 0.50 | Score: 0.52 -> CENTER (eDP-1)
+EAR: 0.28 | Head:  +8.2° | Iris: 0.51 | Gaze Angle:  +8.4° -> CENTER (eDP-1)
 ```
 
-If your camera is offset horizontally relative to your center screen (e.g., mounted to the side), note the resting Yaw shown when looking directly at your center monitor, and supply it via `--center-yaw-offset`:
+If your camera is offset horizontally relative to your center screen (e.g. mounted to the side), note the resting Yaw shown when looking directly at your center monitor, and supply it via `--center-yaw-offset`:
 
 ```bash
 uv run eyegaze-focus --calibrate --center-yaw-offset 5.0
+```
+
+To adjust the angular width of your center display:
+
+```bash
+uv run eyegaze-focus --center-span 30.0 --hysteresis 6.0
 ```
 
 ### CLI Options
@@ -84,9 +94,11 @@ uv run eyegaze-focus --calibrate --center-yaw-offset 5.0
 | `--camera` | `0` | V4L2 webcam device index (`/dev/video0`) |
 | `--fps` | `15.0` | Capture and inference frame rate |
 | `--dwell` | `0.25` | Dwell duration in seconds required before switching |
+| `--center-span` | `25.0` | Half-width of center screen deadband in degrees (`[-25°, +25°]`) |
+| `--hysteresis` | `5.0` | Hysteresis margin in degrees before releasing screen focus |
+| `--iris-weight` | `20.0` | Maximum ocular deflection contribution in degrees |
+| `--center-yaw-offset` | `0.0` | Baseline offset in degrees subtracted from raw head yaw |
 | `--ear-threshold` | `0.20` | Minimum EAR below which frame is discarded as a blink |
-| `--yaw-weight` | `0.015` | Multiplier for head yaw in composite gaze score |
-| `--center-yaw-offset` | `0.0` | Baseline offset in degrees subtracted from head yaw |
 | `--width` | `640` | Video capture width |
 | `--height` | `480` | Video capture height |
 | `-v, --verbose` | `False` | Enable debug logging |

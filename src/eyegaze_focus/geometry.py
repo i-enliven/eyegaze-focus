@@ -123,11 +123,12 @@ def get_bilateral_iris_ratio(landmarks, w: float, h: float) -> float:
 
 
 def estimate_head_yaw(landmarks, w: float, h: float) -> float:
-    """Estimate head yaw rotation angle in degrees using Perspective-n-Point.
+    """Estimate head yaw rotation angle in user-centric degrees.
 
-    Positive yaw = Head turned to user's Left (+deg)
-    Negative yaw = Head turned to user's Right (-deg)
-    0.0 = Head centered
+    Returns:
+        Positive yaw (+deg): Head turned to user's Left (Screen 0)
+        Negative yaw (-deg): Head turned to user's Right (Screen 2)
+        0.0: Head centered
     """
     image_points = np.array(
         [[landmarks[idx].x * w, landmarks[idx].y * h] for idx in HEAD_POSE_LANDMARKS],
@@ -155,23 +156,40 @@ def estimate_head_yaw(landmarks, w: float, h: float) -> float:
     rot_matrix, _ = cv2.Rodrigues(rvec)
     proj_matrix = np.hstack([rot_matrix, tvec])
     _, _, _, _, _, _, euler = cv2.decomposeProjectionMatrix(proj_matrix)
-    yaw_deg = float(euler[1, 0])
-    return yaw_deg
+    # OpenCV camera space rotates clockwise (negative Euler yaw) when turning to user's Left.
+    # We negate so user's Left is positive (+deg) and user's Right is negative (-deg).
+    raw_yaw = float(euler[1, 0])
+    return -raw_yaw
 
 
+def compute_gaze_angle_deg(
+    iris_ratio: float,
+    head_yaw_deg: float,
+    iris_weight_deg: float = 20.0,
+    yaw_offset_deg: float = 0.0,
+) -> float:
+    """Calculate combined horizontal gaze angle in degrees.
+
+    Interpretation:
+      > +center_span (e.g. > +25°): Gaze directed to Left screen (Screen 0)
+      Within [-center_span, +center_span] (e.g. -25° to +25°): Center screen (Screen 1)
+      < -center_span (e.g. < -25°): Gaze directed to Right screen (Screen 2)
+    """
+    effective_yaw = head_yaw_deg - yaw_offset_deg
+    iris_delta = (iris_ratio - 0.50) * iris_weight_deg
+    return float(effective_yaw + iris_delta)
+
+
+# Backward compatibility alias
 def compute_gaze_score(
     iris_ratio: float,
     head_yaw_deg: float,
-    yaw_weight: float = 0.015,
+    yaw_weight: float = 0.010,
     yaw_offset_deg: float = 0.0,
 ) -> float:
-    """Fuse bilateral iris ratio and head yaw into a unified horizontal score.
-
-    Score interpretation:
-      < 0.42: Gaze directed to Right screen (Screen 2)
-      0.42 - 0.58: Gaze directed to Center screen (Screen 1)
-      > 0.58: Gaze directed to Left screen (Screen 0)
-    """
-    effective_yaw = head_yaw_deg - yaw_offset_deg
-    composite = iris_ratio + (yaw_weight * effective_yaw)
-    return float(np.clip(composite, 0.0, 1.0))
+    return compute_gaze_angle_deg(
+        iris_ratio=iris_ratio,
+        head_yaw_deg=head_yaw_deg,
+        iris_weight_deg=20.0,
+        yaw_offset_deg=yaw_offset_deg,
+    )

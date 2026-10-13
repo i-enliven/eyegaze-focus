@@ -4,45 +4,57 @@ import time
 
 
 class ScreenClassifier:
-    """Classifies continuous horizontal gaze score into discrete screen indices with hysteresis.
+    """Classifies continuous horizontal gaze angle in degrees into discrete screen indices with hysteresis.
 
     Screen indices:
-      0 = Left screen
-      1 = Center screen
-      2 = Right screen
+      0 = Left screen (gaze_angle >= +center_span_deg)
+      1 = Center screen (gaze_angle between [-center_span_deg, +center_span_deg])
+      2 = Right screen (gaze_angle <= -center_span_deg)
     """
 
     def __init__(
         self,
-        left_enter: float = 0.60,
-        left_exit: float = 0.55,
-        right_enter: float = 0.40,
-        right_exit: float = 0.45,
+        center_span_deg: float = 25.0,
+        hysteresis_deg: float = 5.0,
         initial_screen: int = 1,
     ):
-        if left_exit > left_enter:
-            raise ValueError("left_exit cannot be greater than left_enter")
-        if right_exit < right_enter:
-            raise ValueError("right_exit cannot be less than right_enter")
+        if center_span_deg <= 0.0:
+            raise ValueError("center_span_deg must be positive")
+        if hysteresis_deg < 0.0 or hysteresis_deg >= center_span_deg:
+            raise ValueError("hysteresis_deg must be non-negative and less than center_span_deg")
 
-        self.left_enter = left_enter
-        self.left_exit = left_exit
-        self.right_enter = right_enter
-        self.right_exit = right_exit
+        self.center_span_deg = center_span_deg
+        self.hysteresis_deg = hysteresis_deg
         self.current_screen = initial_screen
 
-    def classify(self, score: float) -> int:
-        """Evaluate continuous score against current state and hysteresis boundaries."""
+    @property
+    def left_enter(self) -> float:
+        return self.center_span_deg
+
+    @property
+    def left_exit(self) -> float:
+        return self.center_span_deg - self.hysteresis_deg
+
+    @property
+    def right_enter(self) -> float:
+        return -self.center_span_deg
+
+    @property
+    def right_exit(self) -> float:
+        return -(self.center_span_deg - self.hysteresis_deg)
+
+    def classify(self, angle_deg: float) -> int:
+        """Evaluate continuous gaze angle against current state and hysteresis boundaries."""
         if self.current_screen == 0:  # Currently Left
-            if score < self.left_exit:
-                self.current_screen = 2 if score <= self.right_enter else 1
+            if angle_deg < self.left_exit:
+                self.current_screen = 2 if angle_deg <= self.right_enter else 1
         elif self.current_screen == 2:  # Currently Right
-            if score > self.right_exit:
-                self.current_screen = 0 if score >= self.left_enter else 1
+            if angle_deg > self.right_exit:
+                self.current_screen = 0 if angle_deg >= self.left_enter else 1
         else:  # Currently Center (1)
-            if score >= self.left_enter:
+            if angle_deg >= self.left_enter:
                 self.current_screen = 0
-            elif score <= self.right_enter:
+            elif angle_deg <= self.right_enter:
                 self.current_screen = 2
 
         return self.current_screen

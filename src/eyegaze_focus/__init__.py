@@ -5,6 +5,7 @@ __version__ = "0.1.0"
 from eyegaze_focus.classifier import DwellFilter, ScreenClassifier
 from eyegaze_focus.geometry import (
     calculate_ear,
+    compute_gaze_angle_deg,
     compute_gaze_score,
     estimate_head_yaw,
     get_bilateral_iris_ratio,
@@ -16,6 +17,7 @@ __all__ = [
     "IpcClient",
     "ScreenClassifier",
     "calculate_ear",
+    "compute_gaze_angle_deg",
     "compute_gaze_score",
     "estimate_head_yaw",
     "get_bilateral_iris_ratio",

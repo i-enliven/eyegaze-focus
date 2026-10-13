@@ -7,39 +7,47 @@ from eyegaze_focus.classifier import DwellFilter, ScreenClassifier
 
 def test_screen_classifier_initialization_validation():
     with pytest.raises(ValueError):
-        ScreenClassifier(left_enter=0.50, left_exit=0.60)
+        ScreenClassifier(center_span_deg=-10.0)
     with pytest.raises(ValueError):
-        ScreenClassifier(right_enter=0.45, right_exit=0.40)
+        ScreenClassifier(center_span_deg=25.0, hysteresis_deg=25.0)
 
 
 def test_screen_classifier_hysteresis_left():
-    # left_enter=0.60, left_exit=0.55
-    clf = ScreenClassifier(initial_screen=1)
+    # center_span_deg=25.0, hysteresis_deg=5.0
+    # Left enter: >= 25.0, Left exit: < 20.0
+    clf = ScreenClassifier(center_span_deg=25.0, hysteresis_deg=5.0, initial_screen=1)
 
-    # Center to Left
-    assert clf.classify(0.58) == 1  # Not past left_enter yet
-    assert clf.classify(0.61) == 0  # Reached left_enter -> transitions to 0
+    # Within center: [-25°, +25°]
+    assert clf.classify(15.0) == 1
+    assert clf.classify(24.0) == 1
 
-    # Remains Left despite minor dip down to 0.56 (above left_exit 0.55)
-    assert clf.classify(0.56) == 0
+    # Crosses +25.0° -> transitions to Left (0)
+    assert clf.classify(25.5) == 0
 
-    # Crosses below left_exit -> transitions back to Center
-    assert clf.classify(0.54) == 1
+    # Remains Left despite dipping slightly down to 22.0° (above left_exit 20.0°)
+    assert clf.classify(22.0) == 0
+
+    # Crosses below left_exit (20.0°) -> transitions back to Center (1)
+    assert clf.classify(19.0) == 1
 
 
 def test_screen_classifier_hysteresis_right():
-    # right_enter=0.40, right_exit=0.45
-    clf = ScreenClassifier(initial_screen=1)
+    # center_span_deg=25.0, hysteresis_deg=5.0
+    # Right enter: <= -25.0, Right exit: > -20.0
+    clf = ScreenClassifier(center_span_deg=25.0, hysteresis_deg=5.0, initial_screen=1)
 
-    # Center to Right
-    assert clf.classify(0.42) == 1  # Not below right_enter yet
-    assert clf.classify(0.39) == 2  # Reached right_enter -> transitions to 2
+    # Within center
+    assert clf.classify(-15.0) == 1
+    assert clf.classify(-24.0) == 1
 
-    # Remains Right despite slight rise to 0.44 (below right_exit 0.45)
-    assert clf.classify(0.44) == 2
+    # Crosses -25.0° -> transitions to Right (2)
+    assert clf.classify(-25.5) == 2
 
-    # Crosses above right_exit -> transitions back to Center
-    assert clf.classify(0.46) == 1
+    # Remains Right despite rising to -22.0° (below right_exit -20.0°)
+    assert clf.classify(-22.0) == 2
+
+    # Crosses above right_exit (-20.0°) -> transitions back to Center (1)
+    assert clf.classify(-19.0) == 1
 
 
 def test_dwell_filter_behavior():
